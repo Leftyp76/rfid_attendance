@@ -322,12 +322,26 @@ End Function
 
 Function SK(ByVal x As Double, ByVal y As Double, ByVal z As Double) As Variant
     ' model point (mm) -> sketch coordinates (m)
-    Dim a(2) As Double, v As Variant, p As Object
+    Dim a(2) As Double, v As Variant, p As Object, r As Variant, t As Variant, o(2) As Double
     a(0) = x / 1000#: a(1) = y / 1000#: a(2) = z / 1000#
     v = a
-    Set p = swMath.CreatePoint(v)
-    Set p = p.MultiplyTransform(swXform)
-    SK = p.ArrayData
+    On Error Resume Next
+    Set p = swMath.CreatePoint((v))                 ' double parentheses = pass BY VALUE (required)
+    If Not p Is Nothing Then Set p = p.MultiplyTransform(swXform)
+    If Not p Is Nothing Then r = p.ArrayData
+    On Error GoTo 0
+    If IsArray(r) Then
+        If Abs(r(0)) + Abs(r(1)) + Abs(r(2)) > 0 Or (Abs(a(0)) + Abs(a(1)) + Abs(a(2)) = 0) Then
+            SK = r
+            Exit Function
+        End If
+    End If
+    ' fallback: apply the transform by hand.  ArrayData = 9 rotation terms, 3 translation, 1 scale
+    t = swXform.ArrayData
+    o(0) = (a(0) * t(0) + a(1) * t(3) + a(2) * t(6)) * t(12) + t(9)
+    o(1) = (a(0) * t(1) + a(1) * t(4) + a(2) * t(7)) * t(12) + t(10)
+    o(2) = (a(0) * t(2) + a(1) * t(5) + a(2) * t(8)) * t(12) + t(11)
+    SK = o
 End Function
 
 Sub MLine(ByVal x1 As Double, ByVal y1 As Double, ByVal z1 As Double, ByVal x2 As Double, ByVal y2 As Double, ByVal z2 As Double)
