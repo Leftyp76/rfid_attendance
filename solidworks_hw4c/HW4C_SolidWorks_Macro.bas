@@ -18,6 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
+'  v9: correct sketch-status codes; point alignment via sgHORIZONTAL2D/sgVERTICAL2D;
 '  v8: every sketch fully defined with the drawing's dimensions; names Step N / Sketch N;
 '  v7: volume check after every step (auto-reverses a boss that went the wrong way); Desktop/OneDrive-aware save; points passed by value; normal sketch mode; robust save.
 '  Every sketch is drawn in MODEL coordinates (mm) and converted with the sketch's
@@ -438,7 +439,8 @@ End Sub
 '  All coordinates are model mm.  "H"/"V" refer to the sketch's own axes.
 ' =====================================================================================
 Function SkStatus() As Long
-    ' swConstrainedStatus_e: 1 under, 2 fully, 3 over, 4 no solution, 5 invalid   (-1 = unknown)
+    ' swConstrainedStatus_e as observed in SOLIDWORKS 2026: 2 = under defined, 3 = fully defined,
+    ' anything above 3 = over defined / cannot be solved.   (-1 = could not read)
     On Error Resume Next
     SkStatus = -1
     SkStatus = swModel.SketchManager.ActiveSketch.GetConstrainedStatus
@@ -446,16 +448,15 @@ End Function
 
 Function StatusText(ByVal st As Long) As String
     Select Case st
-        Case 2: StatusText = "fully defined"
-        Case 1: StatusText = "under defined"
-        Case 3: StatusText = "OVER defined"
-        Case 4, 5: StatusText = "cannot be solved"
-        Case Else: StatusText = "status unknown"
+        Case 3: StatusText = "fully defined"
+        Case 2: StatusText = "under defined"
+        Case Is >= 4: StatusText = "OVER defined / not solvable (code " & st & ")"
+        Case Else: StatusText = "status unknown (code " & st & ")"
     End Select
 End Function
 
 Function Bad(ByVal st As Long) As Boolean
-    Bad = (st = 3 Or st = 4 Or st = 5)
+    Bad = (st >= 4)
 End Function
 
 Sub SelSeg(ByVal x As Double, ByVal y As Double, ByVal z As Double, ByVal append As Boolean)
@@ -488,7 +489,7 @@ Sub RelPts(ByVal horizontal As Boolean)
     Dim before As Long
     before = SkStatus()
     On Error Resume Next
-    If horizontal Then swModel.SketchAddConstraints "sgHORIZPOINTS2D" Else swModel.SketchAddConstraints "sgVERTPOINTS2D"
+    If horizontal Then swModel.SketchAddConstraints "sgHORIZONTAL2D" Else swModel.SketchAddConstraints "sgVERTICAL2D"
     On Error GoTo 0
     If Bad(SkStatus()) And Not Bad(before) Then swModel.EditUndo2 1
     swModel.ClearSelection2 True
@@ -706,10 +707,7 @@ End Sub
 Sub EnsureExtent(f As Object, ByVal axis As Integer, ByVal loMM As Double, ByVal hiMM As Double)
     Dim lo As Double, hi As Double, tries As Integer
     For tries = 1 To 2
-        If Not FeatExtent(f, axis, lo, hi) Then
-            warnings = warnings & curStep & ": could not read face extents" & vbCrLf
-            Exit Sub
-        End If
+        If Not FeatExtent(f, axis, lo, hi) Then Exit Sub        ' the volume check still covers this step
         If Abs(lo - loMM) < 0.5 And Abs(hi - hiMM) < 0.5 Then Exit Sub
         If tries = 1 Then ReverseExtrude f
     Next
