@@ -1,8 +1,10 @@
 # HW#4C – Arch bracket – build notes
 
 Everything below is what the macro `HW4C_SolidWorks_Macro.bas` does, in order.
-Feature names in the SolidWorks tree carry the same `StepNN` prefix, so you can
-drag the rollback bar to any step and see exactly what was added.
+Features are named `Step 1` to `Step 14` in the SolidWorks tree, and each sketch is
+`Sketch N` with the same number as its step. Drag the rollback bar to any step to
+see exactly what was added. Steps 8 and 11 are reference planes and Steps 10 and 13
+are mirrors, so they have no sketch.
 
 Model volume: **779,719 mm³** (drawing says 779,719 mm³ – matches).
 
@@ -57,13 +59,40 @@ arch centre = 35 (Y = 55), gusset shoulders = 35, arch crown = 35 + 59 = 94
 | 2× Ø16, 2× R16 | Ear holes and ear rounds |
 | (120) | Overall height, reference |
 
+## How each sketch is fully defined
+
+Every sketch uses the drawing's own dimensions plus relations. The origin sits at the
+middle of the base plate's back bottom edge.
+
+| Sketch | Relations | Dimensions |
+|---|---|---|
+| 1 | Horizontal and vertical edges, origin at midpoint of back edge | 222, 96 |
+| 2 | Same as Sketch 1 | 120, 96 |
+| 3 | None | Ø22, 52 from origin (44 from the front edge), 111 to the base plate's back-right edge |
+| 4 | Horizontal bottom, vertical sides, R59 tangent to both slopes | R59, 196, 35 on each side, 55 to arc centre, 20, 98, 111 to base edge |
+| 5 | R59 and R24 concentric, Ø32 concentric, end arcs tangent to both | R59, R24, Ø32, 55 to arc centre and to each end-arc centre, 111 to base edge |
+| 6 | R48 and R35 concentric, end arcs tangent to both | R48, R35, 55 to arc centre and to each end-arc centre, 111 to base edge |
+| 7 | None | Ø16, 55, 111 to base edge |
+| 9 | Horizontal top and bottom, vertical back edge | 20, 35, 40, 96 |
+| 12 | Horizontal top, vertical sides, R16 tangent to both sides | R16, 36, 20, 96 |
+| 14 | None | Ø16, 80, 16 |
+
+The 111 references the base plate's back-right vertical edge. It equals half of 222,
+and no later feature touches that edge, so the reference never breaks.
+
+## Checks the macro runs
+
+* After every step it measures the model volume and compares it with the amount that
+  step must add or remove. A boss that went the wrong way is reversed automatically.
+* The final message shows the total volume against 779,719 mm³, any step that was off,
+  and whether each sketch is fully defined.
+* Every relation or dimension is checked as it is added. Anything that would
+  over-define a sketch is undone.
+
 ## Notes
 
-* Sketches are drawn to exact coordinates by the macro; they are not dimension-
-  driven (they will show as under-defined / blue). Add dimensions if your grader
-  requires fully-defined sketches.
-* The macro pops a message with the computed volume so you can compare with the
-  drawing before submitting.
-* `HW4C_reference.step` is the same part as a STEP file (no feature tree) – useful
-  as a visual cross-check via File > Open in SolidWorks, but submit the .SLDPRT
-  built by the macro.
+* Switch the unit box in the bottom-right corner of SolidWorks to **MMGS** before saving.
+* The macro saves to your real Desktop, including a OneDrive Desktop. If that fails it
+  says so and you can use File > Save As.
+* `HW4C_reference.step` is the same part as a STEP file with no feature tree. It is only
+  a cross-check. Submit the .SLDPRT built by the macro.
