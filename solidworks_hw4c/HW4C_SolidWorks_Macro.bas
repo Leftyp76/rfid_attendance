@@ -18,7 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
-'  v6: entity count via GetSketchSegments; points passed by value; normal sketch mode; robust save.
+'  v7: volume check after every step (auto-reverses a boss that went the wrong way); Desktop/OneDrive-aware save; points passed by value; normal sketch mode; robust save.
 '  Every sketch is drawn in MODEL coordinates (mm) and converted with the sketch's
 '  own ModelToSketchTransform, so the geometry is exact whatever the plane orientation.
 ' =====================================================================================
@@ -31,6 +31,8 @@ Dim swXform As Object        ' MathTransform: model -> active sketch
 Dim PL_FRONT As String, PL_TOP As String, PL_RIGHT As String
 Dim curStep As String
 Dim curSketch As Object      ' Feature of the sketch that was just finished
+Dim lastVol As Double        ' model volume (mm^3) after the previous step
+Dim warnings As String       ' collected non-fatal problems, shown at the end
 
 ' ---- SolidWorks API constants (numeric, so no type-library reference is required) ----
 Const EC_BLIND = 0           ' swEndCondBlind
@@ -87,6 +89,7 @@ Sub main()
     Set f = Boss(BASE_T, False)
     NameFeat f, "Step01 - Base plate 222x96x20", "Sk01 - Base 222x96 (Top Plane)"
     EnsureExtent f, 1, 0, BASE_T                         ' must grow UP: Y 0..20
+    CheckStep f, 426240#, False
 
     ' ---------- Step 02 : pad 120 x 96 x 6 under the base ----------
     curStep = "Step02 pad"
@@ -96,6 +99,7 @@ Sub main()
     Set f = Boss(PAD_T, False)
     NameFeat f, "Step02 - Pad 120x96x6 under base", "Sk02 - Pad 120 wide (base bottom face)"
     EnsureExtent f, 1, -PAD_T, 0                         ' must grow DOWN: Y -6..0
+    CheckStep f, 69120#, True
 
     ' ---------- Step 03 : dia 22 THRU hole in the base, 44 from the front edge ----------
     curStep = "Step03 dia22 hole"
@@ -104,6 +108,7 @@ Sub main()
     EndSketchEntities
     Set f = CutThruAll()
     NameFeat f, "Step03 - Hole dia22 THRU (base)", "Sk03 - dia22 at 44 from front"
+    CheckStep f, -9883.5, False
 
     ' ---------- Step 04 : arch wall, 14 thick, sketched on the Front Plane ----------
     '  outline: 196 wide, vertical to 35 above the base, then straight lines tangent
@@ -122,6 +127,7 @@ Sub main()
     Set f = Boss(WALL_T, False)
     NameFeat f, "Step04 - Arch wall 14 thick (196 wide, R59)", "Sk04 - Arch outline R59 (Front Plane)"
     EnsureExtent f, 2, 0, WALL_T                         ' must grow toward viewer: Z 0..14
+    CheckStep f, 192159#, False
 
     ' ---------- Step 05 : raised horseshoe band R59/R24 + dia32 boss, 14 high ----------
     curStep = "Step05 band + boss"
@@ -135,6 +141,7 @@ Sub main()
     Set f = Boss(BAND_T, False)
     NameFeat f, "Step05 - Horseshoe band R59-R24 + boss dia32, 14 high", "Sk05 - Band + dia32 (wall front face)"
     EnsureExtent f, 2, WALL_T, WALL_T + BAND_T           ' Z 14..28
+    CheckStep f, 88613.3, True                           ' band + boss must ADD material in front
 
     ' ---------- Step 06 : curved slot R48/R35 with R6.5 ends, THRU ALL ----------
     curStep = "Step06 slot"
@@ -146,6 +153,7 @@ Sub main()
     EndSketchEntities
     Set f = CutThruAll()
     NameFeat f, "Step06 - Slot R48-R35 THRU", "Sk06 - Slot R48 R35 (band front face)"
+    CheckStep f, -51173.4, False
 
     ' ---------- Step 07 : dia 16 THRU hole in the boss ----------
     curStep = "Step07 dia16 hole"
@@ -154,6 +162,7 @@ Sub main()
     EndSketchEntities
     Set f = CutThruAll()
     NameFeat f, "Step07 - Hole dia16 THRU (boss)", "Sk07 - dia16 (boss front face)"
+    CheckStep f, -5629.7, False
 
     ' ---------- Step 08/09/10 : gussets (10 thick) on a plane 93 from the Right Plane ----------
     curStep = "Step08 gusset plane"
@@ -168,8 +177,10 @@ Sub main()
     EndSketchEntities
     Set f = Boss(GUS_T, True)                                          ' mid-plane -> X 88..98
     NameFeat f, "Step09 - Gusset 10 thick (mid-plane)", "Sk09 - Gusset profile (gusset plane)"
+    CheckStep f, 18900#, False
     curStep = "Step10 mirror gusset"
     MirrorAboutRight "Step09 - Gusset 10 thick (mid-plane)", "Step10 - Mirror gusset (Right Plane)"
+    CheckStep Nothing, 18900#, False
 
     ' ---------- Step 11/12/13 : ears (12 thick) on a plane 117 from the Right Plane ----------
     curStep = "Step11 ear plane"
@@ -183,8 +194,10 @@ Sub main()
     EndSketchEntities
     Set f = Boss(EAR_T, True)                                          ' mid-plane -> X 111..123
     NameFeat f, "Step12 - Ear 12 thick R16 (mid-plane)", "Sk12 - Ear profile R16 (ear plane)"
+    CheckStep f, 18649.5, False
     curStep = "Step13 mirror ear"
     MirrorAboutRight "Step12 - Ear 12 thick R16 (mid-plane)", "Step13 - Mirror ear (Right Plane)"
+    CheckStep Nothing, 18649.5, False
 
     ' ---------- Step 14 : 2 x dia 16 THRU holes in the ears (one cut through both) ----------
     curStep = "Step14 ear holes"
@@ -193,6 +206,7 @@ Sub main()
     EndSketchEntities
     Set f = CutThruAll()
     NameFeat f, "Step14 - 2x hole dia16 THRU (ears)", "Sk14 - dia16 ear hole (ear plane)"
+    CheckStep f, -4825.5, False
 
     ' ---------- finish ----------
     curStep = "finish"
@@ -201,12 +215,17 @@ Sub main()
     swModel.ShowNamedView2 "*Isometric", 7
     swModel.ViewZoomtofit2
 
-    Dim mp As Object, vol As Double
-    Set mp = swModel.Extension.CreateMassProperty
-    vol = mp.Volume * 1000000000#
+    Dim vol As Double, verdict As String
+    vol = VolMM()
+    If Abs(vol - 779719#) < 100 Then
+        verdict = "MATCHES the drawing."
+    Else
+        verdict = "DOES NOT match the drawing - see the notes below."
+    End If
+    If Len(warnings) = 0 Then warnings = "(none)"
     MsgBox "HW#4C built." & vbCrLf & vbCrLf & _
-           "Volume = " & Format(vol, "#,##0") & " mm^3" & vbCrLf & _
-           "Target  = 779,719 mm^3" & vbCrLf & vbCrLf & _
+           "Volume = " & Format(vol, "#,##0") & " mm^3   (drawing: 779,719)  -> " & verdict & vbCrLf & vbCrLf & _
+           "Step checks: " & vbCrLf & warnings & vbCrLf & vbCrLf & _
            "IMPORTANT: click the unit box in the bottom-right corner of the SolidWorks window" & vbCrLf & _
            "and choose MMGS before submitting.", vbInformation, "HW#4C"
 
@@ -214,16 +233,22 @@ Sub main()
     lastName = InputBox("Enter your last name to save as  HW#4C<LastName>.SLDPRT  on the Desktop" & vbCrLf & _
                         "(leave empty to skip saving)", "Save HW#4C")
     If Len(Trim(lastName)) > 0 Then
-        path = Environ("USERPROFILE") & "\Desktop\HW#4C" & Trim(lastName) & ".SLDPRT"
-        Dim ok As Boolean
+        path = SaveFolder() & "\HW#4C" & Trim(lastName) & ".SLDPRT"
+        Dim ok As Boolean, rc As Long
         On Error Resume Next
-        ok = swModel.Extension.SaveAs(path, 0, 1, Nothing, errs, warns)
-        If Not ok Then ok = (swModel.SaveAs3(path, 0, 1) = 0)
+        ok = swModel.Extension.SaveAs3(path, 0, 1, Nothing, Nothing, errs, warns)
+        If Err.Number <> 0 Or Not ok Then
+            Err.Clear: ok = swModel.Extension.SaveAs(path, 0, 1, Nothing, errs, warns)
+        End If
+        If Err.Number <> 0 Or Not ok Then
+            Err.Clear: rc = swModel.SaveAs3(path, 0, 1): ok = (rc = 0)
+        End If
         On Error GoTo Fail
         If ok Then
             MsgBox "Saved: " & path, vbInformation
         Else
-            MsgBox "Could not save automatically. Use File > Save As and name it  HW#4C" & Trim(lastName), vbExclamation
+            MsgBox "Could not save automatically to:" & vbCrLf & path & vbCrLf & "(SolidWorks error code " & errs & ")" & vbCrLf & vbCrLf & _
+                   "Use File > Save As, choose a folder, and name it  HW#4C" & Trim(lastName), vbExclamation
         End If
     End If
     Exit Sub
@@ -462,12 +487,15 @@ End Sub
 Sub EnsureExtent(f As Object, ByVal axis As Integer, ByVal loMM As Double, ByVal hiMM As Double)
     Dim lo As Double, hi As Double, tries As Integer
     For tries = 1 To 2
-        If Not FeatExtent(f, axis, lo, hi) Then Exit Sub
+        If Not FeatExtent(f, axis, lo, hi) Then
+            warnings = warnings & curStep & ": could not read face extents" & vbCrLf
+            Exit Sub
+        End If
         If Abs(lo - loMM) < 0.5 And Abs(hi - hiMM) < 0.5 Then Exit Sub
         If tries = 1 Then ReverseExtrude f
     Next
-    MsgBox "Please check the direction of '" & f.Name & "': it spans " & Format(lo, "0.0") & " .. " & _
-           Format(hi, "0.0") & " mm (expected " & loMM & " .. " & hiMM & ").", vbExclamation
+    warnings = warnings & curStep & ": '" & f.Name & "' spans " & Format(lo, "0.0") & " .. " & _
+               Format(hi, "0.0") & " mm, expected " & loMM & " .. " & hiMM & vbCrLf
 End Sub
 
 Function FeatExtent(f As Object, ByVal axis As Integer, lo As Double, hi As Double) As Boolean
@@ -483,6 +511,39 @@ Function FeatExtent(f As Object, ByVal axis As Integer, lo As Double, hi As Doub
     Next
     FeatExtent = True
 End Function
+
+Function VolMM() As Double
+    Dim mp As Object
+    Set mp = swModel.Extension.CreateMassProperty
+    VolMM = mp.Volume * 1000000000#
+End Function
+
+Function SaveFolder() As String
+    ' the real Desktop (handles OneDrive-redirected desktops), else Documents, else the user profile
+    Dim sh As Object, p As String
+    On Error Resume Next
+    Set sh = CreateObject("WScript.Shell")
+    p = sh.SpecialFolders("Desktop")
+    If Len(p) = 0 Or Len(Dir(p, vbDirectory)) = 0 Then p = sh.SpecialFolders("MyDocuments")
+    If Len(p) = 0 Or Len(Dir(p, vbDirectory)) = 0 Then p = Environ("USERPROFILE")
+    SaveFolder = p
+End Function
+
+' ---- volume guard: every step must add/remove the expected amount of material ----
+Sub CheckStep(f As Object, ByVal expectedMM3 As Double, ByVal canReverse As Boolean)
+    Dim v As Double, delta As Double, tol As Double
+    tol = Abs(expectedMM3) * 0.01 + 20
+    v = VolMM(): delta = v - lastVol
+    If Abs(delta - expectedMM3) > tol And canReverse And Not f Is Nothing Then
+        ReverseExtrude f                                     ' most likely it went the wrong way
+        v = VolMM(): delta = v - lastVol
+    End If
+    If Abs(delta - expectedMM3) > tol Then
+        warnings = warnings & curStep & ": changed volume by " & Format(delta, "#,##0") & _
+                   " mm^3, expected " & Format(expectedMM3, "#,##0") & vbCrLf
+    End If
+    lastVol = v
+End Sub
 
 Sub ReverseExtrude(f As Object)
     Dim d As Object
