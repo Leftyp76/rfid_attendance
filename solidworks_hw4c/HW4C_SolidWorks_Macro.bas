@@ -18,6 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
+'  v2: sketches are exited and selected before each extrude/cut.
 '  Every sketch is drawn in MODEL coordinates (mm) and converted with the sketch's
 '  own ModelToSketchTransform, so the geometry is exact whatever the plane orientation.
 ' =====================================================================================
@@ -29,6 +30,7 @@ Dim swMath As Object         ' SldWorks.MathUtility
 Dim swXform As Object        ' MathTransform: model -> active sketch
 Dim PL_FRONT As String, PL_TOP As String, PL_RIGHT As String
 Dim curStep As String
+Dim curSketch As Object      ' Feature of the sketch that was just finished
 
 ' ---- SolidWorks API constants (numeric, so no type-library reference is required) ----
 Const EC_BLIND = 0           ' swEndCondBlind
@@ -205,7 +207,8 @@ Sub main()
     MsgBox "HW#4C built." & vbCrLf & vbCrLf & _
            "Volume = " & Format(vol, "#,##0") & " mm^3" & vbCrLf & _
            "Target  = 779,719 mm^3" & vbCrLf & vbCrLf & _
-           "Check that the status bar shows MMGS, then save.", vbInformation, "HW#4C"
+           "IMPORTANT: click the unit box in the bottom-right corner of the SolidWorks window" & vbCrLf & _
+           "and choose MMGS before submitting.", vbInformation, "HW#4C"
 
     Dim lastName As String, path As String, errs As Long, warns As Long
     lastName = InputBox("Enter your last name to save as  HW#4C<LastName>.SLDPRT  on the Desktop" & vbCrLf & _
@@ -283,17 +286,30 @@ Sub SketchOnFace(ByVal x As Double, ByVal y As Double, ByVal z As Double)
 End Sub
 
 Sub StartSketch()
+    swModel.ViewZoomtofit2                                   ' sane zoom so inferencing behaves
     swModel.SketchManager.InsertSketch True
-    swModel.SketchManager.AddToDB = True
-    swModel.SketchManager.DisplayWhenAdded = False
+    swModel.SketchManager.AddToDB = False                    ' normal drawing: endpoints merge
     Set swXform = swModel.SketchManager.ActiveSketch.ModelToSketchTransform
 End Sub
 
 Sub EndSketchEntities()
-    swModel.SketchManager.AddToDB = False
-    swModel.SketchManager.DisplayWhenAdded = True
+    ' exit the sketch so it is solved, then select it for the feature that follows
     swModel.ClearSelection2 True
+    swModel.SketchManager.InsertSketch True
+    Set curSketch = swModel.FeatureByPositionReverse(0)      ' the sketch just finished
+    swModel.ClearSelection2 True
+    If Not swModel.Extension.SelectByID2(curSketch.Name, "SKETCH", 0#, 0#, 0#, False, 0, Nothing, 0) Then
+        Err.Raise vbObjectError + 9, , "Could not select sketch '" & curSketch.Name & "'"
+    End If
 End Sub
+
+Function SketchInfo() As String
+    On Error Resume Next
+    Dim sk As Object, n As Long
+    Set sk = curSketch.GetSpecificFeature2
+    n = sk.GetSketchSegmentCount
+    SketchInfo = " [sketch '" & curSketch.Name & "' has " & n & " entities]"
+End Function
 
 Function SK(ByVal x As Double, ByVal y As Double, ByVal z As Double) As Variant
     ' model point (mm) -> sketch coordinates (m)
@@ -348,7 +364,7 @@ Function Boss(ByVal depthMM As Double, ByVal midPlane As Boolean) As Object
                 False, False, False, False, 0#, 0#, False, False, False, False, True, True, True)
     End If
     On Error GoTo 0
-    If f Is Nothing Then Err.Raise vbObjectError + 3, , "Boss extrude failed (" & curStep & ")"
+    If f Is Nothing Then Err.Raise vbObjectError + 3, , "Boss extrude failed (" & curStep & ")" & SketchInfo()
     Set Boss = f
 End Function
 
@@ -366,7 +382,7 @@ Function CutThruAll() As Object
                 SC_SKETCHPLANE, 0#, False)
     End If
     On Error GoTo 0
-    If f Is Nothing Then Err.Raise vbObjectError + 7, , "Cut failed (" & curStep & ")"
+    If f Is Nothing Then Err.Raise vbObjectError + 7, , "Cut failed (" & curStep & ")" & SketchInfo()
     Set CutThruAll = f
 End Function
 
