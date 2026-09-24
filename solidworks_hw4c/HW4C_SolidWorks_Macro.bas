@@ -18,7 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
-'  v2: sketches are exited and selected before each extrude/cut.
+'  v5: reviewed line by line; points passed by value; normal sketch mode; robust save.
 '  Every sketch is drawn in MODEL coordinates (mm) and converted with the sketch's
 '  own ModelToSketchTransform, so the geometry is exact whatever the plane orientation.
 ' =====================================================================================
@@ -215,10 +215,15 @@ Sub main()
                         "(leave empty to skip saving)", "Save HW#4C")
     If Len(Trim(lastName)) > 0 Then
         path = Environ("USERPROFILE") & "\Desktop\HW#4C" & Trim(lastName) & ".SLDPRT"
-        If swModel.Extension.SaveAs(path, 0, 1, Nothing, errs, warns) Then
+        Dim ok As Boolean
+        On Error Resume Next
+        ok = swModel.Extension.SaveAs(path, 0, 1, Nothing, errs, warns)
+        If Not ok Then ok = (swModel.SaveAs3(path, 0, 1) = 0)
+        On Error GoTo Fail
+        If ok Then
             MsgBox "Saved: " & path, vbInformation
         Else
-            MsgBox "Could not save automatically (error " & errs & "). Use File > Save As and name it HW#4C" & Trim(lastName), vbExclamation
+            MsgBox "Could not save automatically. Use File > Save As and name it  HW#4C" & Trim(lastName), vbExclamation
         End If
     End If
     Exit Sub
@@ -291,8 +296,7 @@ Sub StartSketch()
     swModel.SketchManager.InsertSketch True
     Set sk = swModel.SketchManager.ActiveSketch
     If sk Is Nothing Then Err.Raise vbObjectError + 10, , "No sketch became active after InsertSketch (" & curStep & ")"
-    swModel.SketchManager.AddToDB = True                     ' exact placement, no inferencing
-    swModel.SketchManager.DisplayWhenAdded = True
+    swModel.SketchManager.AddToDB = False                    ' normal mode: coincident endpoints merge
     Set swXform = sk.ModelToSketchTransform
     If swXform Is Nothing Then Err.Raise vbObjectError + 11, , "Sketch has no ModelToSketchTransform (" & curStep & ")"
 End Sub
@@ -375,8 +379,6 @@ End Sub
 
 Sub MRect(ByVal x1 As Double, ByVal y1 As Double, ByVal z1 As Double, ByVal x2 As Double, ByVal y2 As Double, ByVal z2 As Double)
     ' drawn as four lines (corner-to-corner) so it works the same as every other outline
-    Dim a As Variant, b As Variant
-    a = SK(x1, y1, z1): b = SK(x2, y2, z2)
     MLine x1, y1, z1, x2, y1, z1
     MLine x2, y1, z1, x2, y2, z2
     MLine x2, y2, z2, x1, y2, z2
