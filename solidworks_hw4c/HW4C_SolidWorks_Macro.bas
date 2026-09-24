@@ -18,7 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
-'  v5: reviewed line by line; points passed by value; normal sketch mode; robust save.
+'  v6: entity count via GetSketchSegments; points passed by value; normal sketch mode; robust save.
 '  Every sketch is drawn in MODEL coordinates (mm) and converted with the sketch's
 '  own ModelToSketchTransform, so the geometry is exact whatever the plane orientation.
 ' =====================================================================================
@@ -304,8 +304,7 @@ End Sub
 Sub EndSketchEntities()
     ' exit the sketch so it is solved, then select it for the feature that follows
     Dim n As Long
-    swModel.SketchManager.AddToDB = False
-    n = swModel.SketchManager.ActiveSketch.GetSketchSegmentCount
+    n = SegCount(swModel.SketchManager.ActiveSketch)
     If n = 0 Then Err.Raise vbObjectError + 12, , "The sketch for " & curStep & " is empty - no entity was created."
     swModel.ClearSelection2 True
     swModel.SketchManager.InsertSketch True
@@ -318,10 +317,19 @@ End Sub
 
 Function SketchInfo() As String
     On Error Resume Next
-    Dim sk As Object, n As Long
+    Dim sk As Object
     Set sk = curSketch.GetSpecificFeature2
-    n = sk.GetSketchSegmentCount
-    SketchInfo = " [sketch '" & curSketch.Name & "' has " & n & " entities]"
+    SketchInfo = " [sketch '" & curSketch.Name & "' has " & SegCount(sk) & " entities]"
+End Function
+
+Function SegCount(sk As Object) As Long
+    ' number of lines/arcs/circles in a sketch; -1 if it cannot be read (never fatal)
+    Dim v As Variant
+    On Error Resume Next
+    SegCount = -1
+    If sk Is Nothing Then Exit Function
+    v = sk.GetSketchSegments
+    If IsArray(v) Then SegCount = UBound(v) - LBound(v) + 1 Else SegCount = 0
 End Function
 
 Function SK(ByVal x As Double, ByVal y As Double, ByVal z As Double) As Variant
