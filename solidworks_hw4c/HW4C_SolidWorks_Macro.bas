@@ -286,14 +286,23 @@ Sub SketchOnFace(ByVal x As Double, ByVal y As Double, ByVal z As Double)
 End Sub
 
 Sub StartSketch()
+    Dim sk As Object
     swModel.ViewZoomtofit2                                   ' sane zoom so inferencing behaves
     swModel.SketchManager.InsertSketch True
-    swModel.SketchManager.AddToDB = False                    ' normal drawing: endpoints merge
-    Set swXform = swModel.SketchManager.ActiveSketch.ModelToSketchTransform
+    Set sk = swModel.SketchManager.ActiveSketch
+    If sk Is Nothing Then Err.Raise vbObjectError + 10, , "No sketch became active after InsertSketch (" & curStep & ")"
+    swModel.SketchManager.AddToDB = True                     ' exact placement, no inferencing
+    swModel.SketchManager.DisplayWhenAdded = True
+    Set swXform = sk.ModelToSketchTransform
+    If swXform Is Nothing Then Err.Raise vbObjectError + 11, , "Sketch has no ModelToSketchTransform (" & curStep & ")"
 End Sub
 
 Sub EndSketchEntities()
     ' exit the sketch so it is solved, then select it for the feature that follows
+    Dim n As Long
+    swModel.SketchManager.AddToDB = False
+    n = swModel.SketchManager.ActiveSketch.GetSketchSegmentCount
+    If n = 0 Then Err.Raise vbObjectError + 12, , "The sketch for " & curStep & " is empty - no entity was created."
     swModel.ClearSelection2 True
     swModel.SketchManager.InsertSketch True
     Set curSketch = swModel.FeatureByPositionReverse(0)      ' the sketch just finished
@@ -322,30 +331,42 @@ Function SK(ByVal x As Double, ByVal y As Double, ByVal z As Double) As Variant
 End Function
 
 Sub MLine(ByVal x1 As Double, ByVal y1 As Double, ByVal z1 As Double, ByVal x2 As Double, ByVal y2 As Double, ByVal z2 As Double)
-    Dim a As Variant, b As Variant
+    Dim a As Variant, b As Variant, seg As Object
     a = SK(x1, y1, z1): b = SK(x2, y2, z2)
-    swModel.SketchManager.CreateLine a(0), a(1), 0#, b(0), b(1), 0#
+    Set seg = swModel.SketchManager.CreateLine(CDbl(a(0)), CDbl(a(1)), 0#, CDbl(b(0)), CDbl(b(1)), 0#)
+    If seg Is Nothing Then Set seg = swModel.CreateLine2(CDbl(a(0)), CDbl(a(1)), 0#, CDbl(b(0)), CDbl(b(1)), 0#)
+    If seg Is Nothing Then Err.Raise vbObjectError + 13, , "CreateLine returned nothing (" & curStep & ") sketch coords " & Fmt(a) & " -> " & Fmt(b)
 End Sub
+
+Function Fmt(v As Variant) As String
+    Fmt = "(" & Format(v(0) * 1000, "0.00") & ", " & Format(v(1) * 1000, "0.00") & ", " & Format(v(2) * 1000, "0.00") & ") mm"
+End Function
 
 Sub MArc3(ByVal xs As Double, ByVal ys As Double, ByVal zs As Double, _
           ByVal xe As Double, ByVal ye As Double, ByVal ze As Double, _
           ByVal xm As Double, ByVal ym As Double, ByVal zm As Double)
     ' arc from start (s) to end (e) passing through the mid point (m)
-    Dim s As Variant, e As Variant, m As Variant
+    Dim s As Variant, e As Variant, m As Variant, seg As Object
     s = SK(xs, ys, zs): e = SK(xe, ye, ze): m = SK(xm, ym, zm)
-    swModel.SketchManager.Create3PointArc s(0), s(1), 0#, e(0), e(1), 0#, m(0), m(1), 0#
+    Set seg = swModel.SketchManager.Create3PointArc(CDbl(s(0)), CDbl(s(1)), 0#, CDbl(e(0)), CDbl(e(1)), 0#, CDbl(m(0)), CDbl(m(1)), 0#)
+    If seg Is Nothing Then Err.Raise vbObjectError + 14, , "Create3PointArc returned nothing (" & curStep & ") " & Fmt(s) & " -> " & Fmt(e) & " via " & Fmt(m)
 End Sub
 
 Sub MCircle(ByVal xc As Double, ByVal yc As Double, ByVal zc As Double, ByVal r As Double)
-    Dim c As Variant
+    Dim c As Variant, seg As Object
     c = SK(xc, yc, zc)
-    swModel.SketchManager.CreateCircleByRadius c(0), c(1), 0#, r / 1000#
+    Set seg = swModel.SketchManager.CreateCircleByRadius(CDbl(c(0)), CDbl(c(1)), 0#, r / 1000#)
+    If seg Is Nothing Then Err.Raise vbObjectError + 15, , "CreateCircleByRadius returned nothing (" & curStep & ") centre " & Fmt(c) & " r=" & r
 End Sub
 
 Sub MRect(ByVal x1 As Double, ByVal y1 As Double, ByVal z1 As Double, ByVal x2 As Double, ByVal y2 As Double, ByVal z2 As Double)
+    ' drawn as four lines (corner-to-corner) so it works the same as every other outline
     Dim a As Variant, b As Variant
     a = SK(x1, y1, z1): b = SK(x2, y2, z2)
-    swModel.SketchManager.CreateCornerRectangle a(0), a(1), 0#, b(0), b(1), 0#
+    MLine x1, y1, z1, x2, y1, z1
+    MLine x2, y1, z1, x2, y2, z2
+    MLine x2, y2, z2, x1, y2, z2
+    MLine x1, y2, z2, x1, y1, z1
 End Sub
 
 ' =====================================================================================
