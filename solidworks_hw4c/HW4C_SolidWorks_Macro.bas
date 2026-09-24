@@ -18,6 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
+'  v8: every sketch fully defined with the drawing's dimensions; names Step N / Sketch N;
 '  v7: volume check after every step (auto-reverses a boss that went the wrong way); Desktop/OneDrive-aware save; points passed by value; normal sketch mode; robust save.
 '  Every sketch is drawn in MODEL coordinates (mm) and converted with the sketch's
 '  own ModelToSketchTransform, so the geometry is exact whatever the plane orientation.
@@ -33,6 +34,7 @@ Dim curStep As String
 Dim curSketch As Object      ' Feature of the sketch that was just finished
 Dim lastVol As Double        ' model volume (mm^3) after the previous step
 Dim warnings As String       ' collected non-fatal problems, shown at the end
+Dim sketchReport As String   ' defined / under-defined status of every sketch
 
 ' ---- SolidWorks API constants (numeric, so no type-library reference is required) ----
 Const EC_BLIND = 0           ' swEndCondBlind
@@ -85,9 +87,10 @@ Sub main()
     curStep = "Step01 base plate"
     SketchOnPlane PL_TOP
     MRect -BASE_W / 2, 0, 0, BASE_W / 2, 0, BASE_D
+    Define1
     EndSketchEntities
     Set f = Boss(BASE_T, False)
-    NameFeat f, "Step01 - Base plate 222x96x20", "Sk01 - Base 222x96 (Top Plane)"
+    NameFeat f, "Step 1", "Sketch 1"
     EnsureExtent f, 1, 0, BASE_T                         ' must grow UP: Y 0..20
     CheckStep f, 426240#, False
 
@@ -95,9 +98,10 @@ Sub main()
     curStep = "Step02 pad"
     SketchOnFace 0, 0, BASE_D / 2                        ' bottom face of the base
     MRect -PAD_W / 2, 0, 0, PAD_W / 2, 0, BASE_D
+    Define2
     EndSketchEntities
     Set f = Boss(PAD_T, False)
-    NameFeat f, "Step02 - Pad 120x96x6 under base", "Sk02 - Pad 120 wide (base bottom face)"
+    NameFeat f, "Step 2", "Sketch 2"
     EnsureExtent f, 1, -PAD_T, 0                         ' must grow DOWN: Y -6..0
     CheckStep f, 69120#, True
 
@@ -105,9 +109,10 @@ Sub main()
     curStep = "Step03 dia22 hole"
     SketchOnFace -105, BASE_T, 50                        ' top face of the base
     MCircle 0, BASE_T, HOLE22_Z, 11
+    Define3
     EndSketchEntities
     Set f = CutThruAll()
-    NameFeat f, "Step03 - Hole dia22 THRU (base)", "Sk03 - dia22 at 44 from front"
+    NameFeat f, "Step 3", "Sketch 3"
     CheckStep f, -9883.5, False
 
     ' ---------- Step 04 : arch wall, 14 thick, sketched on the Front Plane ----------
@@ -123,9 +128,10 @@ Sub main()
     MArc3 TX, TY, 0, -TX, TY, 0, 0, CY + R_OUT, 0        ' R59 crown
     MLine -TX, TY, 0, -98, CY, 0
     MLine -98, CY, 0, -98, BASE_T, 0
+    Define4 TX, TY
     EndSketchEntities
     Set f = Boss(WALL_T, False)
-    NameFeat f, "Step04 - Arch wall 14 thick (196 wide, R59)", "Sk04 - Arch outline R59 (Front Plane)"
+    NameFeat f, "Step 4", "Sketch 4"
     EnsureExtent f, 2, 0, WALL_T                         ' must grow toward viewer: Z 0..14
     CheckStep f, 192159#, False
 
@@ -137,9 +143,10 @@ Sub main()
     MArc3 R_IN, CY, WALL_T, -R_IN, CY, WALL_T, 0, CY + R_IN, WALL_T                 ' inner R24
     MArc3 -R_IN, CY, WALL_T, -R_OUT, CY, WALL_T, -LOBE_X, CY - LOBE_R, WALL_T       ' left rounded end R17.5
     MCircle 0, CY, WALL_T, BOSS_R                                                    ' dia 32 boss
+    Define5
     EndSketchEntities
     Set f = Boss(BAND_T, False)
-    NameFeat f, "Step05 - Horseshoe band R59-R24 + boss dia32, 14 high", "Sk05 - Band + dia32 (wall front face)"
+    NameFeat f, "Step 5", "Sketch 5"
     EnsureExtent f, 2, WALL_T, WALL_T + BAND_T           ' Z 14..28
     CheckStep f, 88613.3, True                           ' band + boss must ADD material in front
 
@@ -150,62 +157,67 @@ Sub main()
     MArc3 SLOT_RO, CY, 28, SLOT_RI, CY, 28, LOBE_X, CY - SLOT_LR, 28
     MArc3 SLOT_RI, CY, 28, -SLOT_RI, CY, 28, 0, CY + SLOT_RI, 28
     MArc3 -SLOT_RI, CY, 28, -SLOT_RO, CY, 28, -LOBE_X, CY - SLOT_LR, 28
+    Define6
     EndSketchEntities
     Set f = CutThruAll()
-    NameFeat f, "Step06 - Slot R48-R35 THRU", "Sk06 - Slot R48 R35 (band front face)"
+    NameFeat f, "Step 6", "Sketch 6"
     CheckStep f, -51173.4, False
 
     ' ---------- Step 07 : dia 16 THRU hole in the boss ----------
     curStep = "Step07 dia16 hole"
     SketchOnFace 10, CY, WALL_T + BAND_T                 ' front face of the boss
     MCircle 0, CY, WALL_T + BAND_T, HOLE16_R
+    Define7
     EndSketchEntities
     Set f = CutThruAll()
-    NameFeat f, "Step07 - Hole dia16 THRU (boss)", "Sk07 - dia16 (boss front face)"
+    NameFeat f, "Step 7", "Sketch 7"
     CheckStep f, -5629.7, False
 
     ' ---------- Step 08/09/10 : gussets (10 thick) on a plane 93 from the Right Plane ----------
     curStep = "Step08 gusset plane"
-    OffsetPlane PL_RIGHT, GUS_XMID, "Step08 - Gusset plane (93 from Right)"
+    OffsetPlane PL_RIGHT, GUS_XMID, "Step 8"
     curStep = "Step09 gusset"
-    SketchOnPlane "Step08 - Gusset plane (93 from Right)"
+    SketchOnPlane "Step 8"
     '  profile in the side view: front-bottom corner -> up the slope -> flat top -> down the back
     MLine GUS_XMID, BASE_T, BASE_D, GUS_XMID, CY, GUS_ZTOP           ' slope: rises 35 over 56
     MLine GUS_XMID, CY, GUS_ZTOP, GUS_XMID, CY, 0                     ' flat top at 35 above base
     MLine GUS_XMID, CY, 0, GUS_XMID, BASE_T, 0                        ' back edge
     MLine GUS_XMID, BASE_T, 0, GUS_XMID, BASE_T, BASE_D               ' along the base top
+    Define9
     EndSketchEntities
     Set f = Boss(GUS_T, True)                                          ' mid-plane -> X 88..98
-    NameFeat f, "Step09 - Gusset 10 thick (mid-plane)", "Sk09 - Gusset profile (gusset plane)"
+    NameFeat f, "Step 9", "Sketch 9"
     CheckStep f, 18900#, False
     curStep = "Step10 mirror gusset"
-    MirrorAboutRight "Step09 - Gusset 10 thick (mid-plane)", "Step10 - Mirror gusset (Right Plane)"
+    MirrorAboutRight "Step 9", "Step 10"
     CheckStep Nothing, 18900#, False
 
     ' ---------- Step 11/12/13 : ears (12 thick) on a plane 117 from the Right Plane ----------
     curStep = "Step11 ear plane"
-    OffsetPlane PL_RIGHT, EAR_XMID, "Step11 - Ear plane (117 from Right)"
+    OffsetPlane PL_RIGHT, EAR_XMID, "Step 11"
     curStep = "Step12 ear"
-    SketchOnPlane "Step11 - Ear plane (117 from Right)"
+    SketchOnPlane "Step 11"
     MLine EAR_XMID, BASE_T, BASE_D, EAR_XMID, BASE_T, EAR_ZMIN        ' top edge, flush with base top
     MLine EAR_XMID, BASE_T, EAR_ZMIN, EAR_XMID, EAR_CY, EAR_ZMIN      ' back edge, 32 behind the front
     MArc3 EAR_XMID, EAR_CY, EAR_ZMIN, EAR_XMID, EAR_CY, BASE_D, EAR_XMID, EAR_CY - EAR_R, EAR_CZ   ' R16 round
     MLine EAR_XMID, EAR_CY, BASE_D, EAR_XMID, BASE_T, BASE_D          ' front edge
+    Define12
     EndSketchEntities
     Set f = Boss(EAR_T, True)                                          ' mid-plane -> X 111..123
-    NameFeat f, "Step12 - Ear 12 thick R16 (mid-plane)", "Sk12 - Ear profile R16 (ear plane)"
+    NameFeat f, "Step 12", "Sketch 12"
     CheckStep f, 18649.5, False
     curStep = "Step13 mirror ear"
-    MirrorAboutRight "Step12 - Ear 12 thick R16 (mid-plane)", "Step13 - Mirror ear (Right Plane)"
+    MirrorAboutRight "Step 12", "Step 13"
     CheckStep Nothing, 18649.5, False
 
     ' ---------- Step 14 : 2 x dia 16 THRU holes in the ears (one cut through both) ----------
     curStep = "Step14 ear holes"
-    SketchOnPlane "Step11 - Ear plane (117 from Right)"
+    SketchOnPlane "Step 11"
     MCircle EAR_XMID, EAR_CY, EAR_CZ, EAR_HOLE_R
+    Define14
     EndSketchEntities
     Set f = CutThruAll()
-    NameFeat f, "Step14 - 2x hole dia16 THRU (ears)", "Sk14 - dia16 ear hole (ear plane)"
+    NameFeat f, "Step 14", "Sketch 14"
     CheckStep f, -4825.5, False
 
     ' ---------- finish ----------
@@ -226,6 +238,7 @@ Sub main()
     MsgBox "HW#4C built." & vbCrLf & vbCrLf & _
            "Volume = " & Format(vol, "#,##0") & " mm^3   (drawing: 779,719)  -> " & verdict & vbCrLf & vbCrLf & _
            "Step checks: " & vbCrLf & warnings & vbCrLf & vbCrLf & _
+           "Sketches: " & vbCrLf & sketchReport & vbCrLf & _
            "IMPORTANT: click the unit box in the bottom-right corner of the SolidWorks window" & vbCrLf & _
            "and choose MMGS before submitting.", vbInformation, "HW#4C"
 
@@ -331,6 +344,7 @@ Sub EndSketchEntities()
     Dim n As Long
     n = SegCount(swModel.SketchManager.ActiveSketch)
     If n = 0 Then Err.Raise vbObjectError + 12, , "The sketch for " & curStep & " is empty - no entity was created."
+    sketchReport = sketchReport & curStep & ": " & StatusText(SkStatus()) & vbCrLf
     swModel.ClearSelection2 True
     swModel.SketchManager.InsertSketch True
     Set curSketch = swModel.FeatureByPositionReverse(0)      ' the sketch just finished
@@ -416,6 +430,211 @@ Sub MRect(ByVal x1 As Double, ByVal y1 As Double, ByVal z1 As Double, ByVal x2 A
     MLine x2, y1, z1, x2, y2, z2
     MLine x2, y2, z2, x1, y2, z2
     MLine x1, y2, z2, x1, y1, z1
+End Sub
+
+' =====================================================================================
+'  Fully defining the sketches: relations + dimensions that mirror the drawing.
+'  Every addition is checked; anything that would OVER-define the sketch is undone.
+'  All coordinates are model mm.  "H"/"V" refer to the sketch's own axes.
+' =====================================================================================
+Function SkStatus() As Long
+    ' swConstrainedStatus_e: 1 under, 2 fully, 3 over, 4 no solution, 5 invalid   (-1 = unknown)
+    On Error Resume Next
+    SkStatus = -1
+    SkStatus = swModel.SketchManager.ActiveSketch.GetConstrainedStatus
+End Function
+
+Function StatusText(ByVal st As Long) As String
+    Select Case st
+        Case 2: StatusText = "fully defined"
+        Case 1: StatusText = "under defined"
+        Case 3: StatusText = "OVER defined"
+        Case 4, 5: StatusText = "cannot be solved"
+        Case Else: StatusText = "status unknown"
+    End Select
+End Function
+
+Function Bad(ByVal st As Long) As Boolean
+    Bad = (st = 3 Or st = 4 Or st = 5)
+End Function
+
+Sub SelSeg(ByVal x As Double, ByVal y As Double, ByVal z As Double, ByVal append As Boolean)
+    ' select the line/arc/circle passing through this model point
+    swModel.Extension.SelectByID2 "", "SKETCHSEGMENT", x / 1000#, y / 1000#, z / 1000#, append, 0, Nothing, 0
+End Sub
+
+Sub SelPt(ByVal x As Double, ByVal y As Double, ByVal z As Double, ByVal append As Boolean)
+    ' select a sketch point (line end or arc centre) at this model point
+    swModel.Extension.SelectByID2 "", "SKETCHPOINT", x / 1000#, y / 1000#, z / 1000#, append, 0, Nothing, 0
+End Sub
+
+Sub SelOrigin(ByVal append As Boolean)
+    swModel.Extension.SelectByID2 "Point1@Origin", "EXTSKETCHPOINT", 0#, 0#, 0#, append, 0, Nothing, 0
+End Sub
+
+Sub Rel(ByVal relName As String)
+    ' add a relation to the current selection; undo it if the sketch becomes over defined
+    Dim before As Long
+    before = SkStatus()
+    On Error Resume Next
+    swModel.SketchAddConstraints relName
+    On Error GoTo 0
+    If Bad(SkStatus()) And Not Bad(before) Then swModel.EditUndo2 1
+    swModel.ClearSelection2 True
+End Sub
+
+Sub RelPts(ByVal horizontal As Boolean)
+    ' align the two selected points horizontally / vertically (sketch axes)
+    Dim before As Long
+    before = SkStatus()
+    On Error Resume Next
+    If horizontal Then swModel.SketchAddConstraints "sgHORIZPOINTS2D" Else swModel.SketchAddConstraints "sgVERTPOINTS2D"
+    On Error GoTo 0
+    If Bad(SkStatus()) And Not Bad(before) Then swModel.EditUndo2 1
+    swModel.ClearSelection2 True
+End Sub
+
+Sub Dim2(ByVal kind As String, ByVal tx As Double, ByVal ty As Double, ByVal tz As Double)
+    ' kind: "H" horizontal, "V" vertical, "R" radius, "D" diameter.  (tx,ty,tz) = text location, mm
+    Dim before As Long, d As Object
+    before = SkStatus()
+    On Error Resume Next
+    Select Case kind
+        Case "H": Set d = swModel.AddHorizontalDimension2(tx / 1000#, ty / 1000#, tz / 1000#)
+        Case "V": Set d = swModel.AddVerticalDimension2(tx / 1000#, ty / 1000#, tz / 1000#)
+        Case "R": Set d = swModel.AddRadialDimension2(tx / 1000#, ty / 1000#, tz / 1000#)
+        Case "D": Set d = swModel.AddDiameterDimension2(tx / 1000#, ty / 1000#, tz / 1000#)
+        Case Else: Set d = swModel.AddDimension2(tx / 1000#, ty / 1000#, tz / 1000#)
+    End Select
+    On Error GoTo 0
+    If Bad(SkStatus()) And Not Bad(before) Then swModel.EditUndo2 1
+    swModel.ClearSelection2 True
+End Sub
+
+Sub Define1()      ' base 222 x 96 on the Top Plane; origin at the middle of the back edge
+    SelSeg 0, 0, 0, False:            Rel "sgHORIZONTAL2D"                 ' back edge
+    SelSeg 0, 0, BASE_D, False:       Rel "sgHORIZONTAL2D"                 ' front edge
+    SelSeg -BASE_W / 2, 0, 48, False: Rel "sgVERTICAL2D"                   ' left edge
+    SelSeg BASE_W / 2, 0, 48, False:  Rel "sgVERTICAL2D"                   ' right edge
+    SelOrigin False: SelSeg 0, 0, 0, True: Rel "sgATMIDDLE"                ' origin = midpoint of back edge
+    SelSeg 0, 0, BASE_D, False:       Dim2 "H", 0, 0, BASE_D + 15          ' 222
+    SelSeg BASE_W / 2, 0, 48, False:  Dim2 "V", BASE_W / 2 + 15, 0, 48     ' 96
+End Sub
+
+Sub Define2()      ' pad 120 x 96 on the base bottom face
+    SelSeg 0, 0, 0, False:            Rel "sgHORIZONTAL2D"
+    SelSeg 0, 0, BASE_D, False:       Rel "sgHORIZONTAL2D"
+    SelSeg -PAD_W / 2, 0, 48, False:  Rel "sgVERTICAL2D"
+    SelSeg PAD_W / 2, 0, 48, False:   Rel "sgVERTICAL2D"
+    SelOrigin False: SelSeg 0, 0, 0, True: Rel "sgATMIDDLE"
+    SelSeg 0, 0, BASE_D, False:       Dim2 "H", 0, 0, BASE_D + 15          ' 120
+    SelSeg PAD_W / 2, 0, 48, False:   Dim2 "V", PAD_W / 2 + 15, 0, 48      ' 96
+End Sub
+
+Sub Define3()      ' dia 22 hole, 52 from the origin (= 44 from the front edge)
+    SelSeg 11, BASE_T, HOLE22_Z, False: Dim2 "D", 25, BASE_T, HOLE22_Z + 20              ' dia 22
+    SelOrigin False: SelPt 0, BASE_T, HOLE22_Z, True: RelPts False                        ' centre on the centreline
+    SelOrigin False: SelPt 0, BASE_T, HOLE22_Z, True: Dim2 "V", 30, BASE_T, HOLE22_Z / 2  ' 52
+End Sub
+
+Sub Define4(ByVal TX As Double, ByVal TY As Double)   ' arch wall outline on the Front Plane
+    SelSeg 0, BASE_T, 0, False:              Rel "sgHORIZONTAL2D"                          ' bottom
+    SelSeg 98, (BASE_T + CY) / 2, 0, False:  Rel "sgVERTICAL2D"                            ' right side
+    SelSeg -98, (BASE_T + CY) / 2, 0, False: Rel "sgVERTICAL2D"                            ' left side
+    SelSeg 98, (BASE_T + CY) / 2, 0, False: SelSeg -98, (BASE_T + CY) / 2, 0, True: Rel "sgEQUAL"
+    SelSeg 0, CY + R_OUT, 0, False: SelSeg (98 + TX) / 2, (CY + TY) / 2, 0, True: Rel "sgTANGENT"    ' arc / right slope
+    SelSeg 0, CY + R_OUT, 0, False: SelSeg -(98 + TX) / 2, (CY + TY) / 2, 0, True: Rel "sgTANGENT"   ' arc / left slope
+    SelOrigin False: SelPt 0, CY, 0, True:   RelPts False                                  ' arc centre above origin
+    SelSeg 0, CY + R_OUT, 0, False:          Dim2 "R", 45, CY + 70, 0                      ' R59
+    SelSeg 0, BASE_T, 0, False:              Dim2 "H", 0, BASE_T - 15, 0                   ' 196
+    SelSeg 98, (BASE_T + CY) / 2, 0, False:  Dim2 "V", 115, (BASE_T + CY) / 2, 0           ' 35
+    SelOrigin False: SelPt 0, CY, 0, True:   Dim2 "V", -20, CY / 2, 0                      ' 55 (arc centre height)
+    SelOrigin False: SelSeg 0, BASE_T, 0, True: Dim2 "V", 20, BASE_T / 2, 0                ' 20 (base top)
+    SelOrigin False: SelSeg 98, (BASE_T + CY) / 2, 0, True: Dim2 "H", 49, 5, 0             ' 98 (half width)
+End Sub
+
+Sub Define5()      ' horseshoe band + boss on the wall front face (Z = 14)
+    Dim z As Double: z = WALL_T
+    SelSeg 0, CY + R_OUT, z, False: SelSeg 0, CY + R_IN, z, True: Rel "sgCONCENTRIC"            ' R59 & R24
+    SelSeg 0, CY + R_OUT, z, False: SelSeg BOSS_R, CY, z, True: Rel "sgCONCENTRIC"              ' boss on the same centre
+    SelSeg 0, CY + R_OUT, z, False: SelSeg LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"        ' right lobe
+    SelSeg 0, CY + R_IN, z, False:  SelSeg LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"
+    SelSeg 0, CY + R_OUT, z, False: SelSeg -LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"       ' left lobe
+    SelSeg 0, CY + R_IN, z, False:  SelSeg -LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"
+    SelPt 0, CY, z, False: SelPt LOBE_X, CY, z, True:  RelPts True                              ' lobe centres level with arch centre
+    SelPt 0, CY, z, False: SelPt -LOBE_X, CY, z, True: RelPts True
+    SelOrigin False: SelPt 0, CY, z, True:             RelPts False                             ' centre above origin
+    SelSeg 0, CY + R_OUT, z, False: Dim2 "R", 50, CY + 70, z                                    ' R59
+    SelSeg 0, CY + R_IN, z, False:  Dim2 "R", 20, CY + 40, z                                    ' R24
+    SelSeg BOSS_R, CY, z, False:    Dim2 "D", 25, CY - 25, z                                    ' dia 32
+    SelOrigin False: SelPt 0, CY, z, True: Dim2 "V", -75, CY / 2, z                             ' 55
+End Sub
+
+Sub Define6()      ' through slot on the band front face (Z = 28)
+    Dim z As Double: z = WALL_T + BAND_T
+    SelSeg 0, CY + SLOT_RO, z, False: SelSeg 0, CY + SLOT_RI, z, True: Rel "sgCONCENTRIC"
+    SelSeg 0, CY + SLOT_RO, z, False: SelSeg LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
+    SelSeg 0, CY + SLOT_RI, z, False: SelSeg LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
+    SelSeg 0, CY + SLOT_RO, z, False: SelSeg -LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
+    SelSeg 0, CY + SLOT_RI, z, False: SelSeg -LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
+    SelPt 0, CY, z, False: SelPt LOBE_X, CY, z, True:  RelPts True
+    SelPt 0, CY, z, False: SelPt -LOBE_X, CY, z, True: RelPts True
+    SelOrigin False: SelPt 0, CY, z, True:             RelPts False
+    SelSeg 0, CY + SLOT_RO, z, False: Dim2 "R", 45, CY + 60, z                                  ' R48
+    SelSeg 0, CY + SLOT_RI, z, False: Dim2 "R", 25, CY + 45, z                                  ' R35
+    SelOrigin False: SelPt 0, CY, z, True: Dim2 "V", -75, CY / 2, z                             ' 55
+End Sub
+
+Sub Define7()      ' dia 16 through hole on the boss face
+    Dim z As Double: z = WALL_T + BAND_T
+    SelSeg HOLE16_R, CY, z, False:         Dim2 "D", 20, CY - 20, z                             ' dia 16
+    SelOrigin False: SelPt 0, CY, z, True: RelPts False
+    SelOrigin False: SelPt 0, CY, z, True: Dim2 "V", -75, CY / 2, z                             ' 55
+End Sub
+
+Function PlaneX() As Double
+    ' model X of the active sketch plane (the offset planes may sit on either side of the part)
+    Dim t As Variant, i As Integer, k As Integer, a(2) As Double
+    t = swXform.ArrayData
+    For i = 0 To 2
+        a(i) = 0
+        For k = 0 To 2
+            a(i) = a(i) - t(3 * i + k) * t(9 + k)
+        Next
+    Next
+    PlaneX = a(0) * 1000#
+End Function
+
+Sub Define9()      ' gusset profile on the gusset plane (sketch x = Z, sketch y = Y)
+    Dim x As Double: x = PlaneX()
+    SelSeg x, CY, GUS_ZTOP / 2, False:          Rel "sgHORIZONTAL2D"                 ' flat top
+    SelSeg x, BASE_T, BASE_D / 2, False:        Rel "sgHORIZONTAL2D"                 ' bottom
+    SelSeg x, (BASE_T + CY) / 2, 0, False:      Rel "sgVERTICAL2D"                   ' back edge
+    SelOrigin False: SelPt x, BASE_T, 0, True:  RelPts False                         ' back-bottom corner above origin
+    SelOrigin False: SelPt x, BASE_T, 0, True:  Dim2 "V", x, BASE_T / 2, -15         ' 20
+    SelSeg x, (BASE_T + CY) / 2, 0, False:      Dim2 "V", x, (BASE_T + CY) / 2, -15  ' 35
+    SelSeg x, CY, GUS_ZTOP / 2, False:          Dim2 "H", x, CY + 15, GUS_ZTOP / 2   ' 40
+    SelSeg x, BASE_T, BASE_D / 2, False:        Dim2 "H", x, BASE_T - 15, BASE_D / 2 ' 96
+End Sub
+
+Sub Define12()     ' ear profile on the ear plane
+    Dim x As Double: x = PlaneX()
+    SelSeg x, BASE_T, (BASE_D + EAR_ZMIN) / 2, False:  Rel "sgHORIZONTAL2D"          ' top
+    SelSeg x, (BASE_T + EAR_CY) / 2, EAR_ZMIN, False:  Rel "sgVERTICAL2D"            ' back
+    SelSeg x, (BASE_T + EAR_CY) / 2, BASE_D, False:    Rel "sgVERTICAL2D"            ' front
+    SelSeg x, EAR_CY - EAR_R, EAR_CZ, False: SelSeg x, (BASE_T + EAR_CY) / 2, EAR_ZMIN, True: Rel "sgTANGENT"
+    SelSeg x, EAR_CY - EAR_R, EAR_CZ, False: SelSeg x, (BASE_T + EAR_CY) / 2, BASE_D, True:   Rel "sgTANGENT"
+    SelSeg x, EAR_CY - EAR_R, EAR_CZ, False:           Dim2 "R", x, EAR_CY - 30, EAR_CZ + 10          ' R16
+    SelSeg x, (BASE_T + EAR_CY) / 2, EAR_ZMIN, False:  Dim2 "V", x, (BASE_T + EAR_CY) / 2, EAR_ZMIN - 15   ' 36
+    SelOrigin False: SelPt x, BASE_T, BASE_D, True:    Dim2 "V", x, BASE_T / 2, BASE_D + 15           ' 20
+    SelOrigin False: SelPt x, BASE_T, BASE_D, True:    Dim2 "H", x, BASE_T + 15, BASE_D / 2           ' 96
+End Sub
+
+Sub Define14()     ' ear hole
+    Dim x As Double: x = PlaneX()
+    SelSeg x, EAR_CY + EAR_HOLE_R, EAR_CZ, False:      Dim2 "D", x, EAR_CY - 25, EAR_CZ + 15   ' dia 16
+    SelOrigin False: SelPt x, EAR_CY, EAR_CZ, True:    Dim2 "H", x, 5, EAR_CZ / 2              ' 80
+    SelOrigin False: SelPt x, EAR_CY, EAR_CZ, True:    Dim2 "V", x, EAR_CY / 2, EAR_CZ + 25    ' 16
 End Sub
 
 ' =====================================================================================
