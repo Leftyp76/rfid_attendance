@@ -18,6 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
+'  v11: sketches 3-7 positioned with dimensions only (111 to base edge, 55 to lobe centres);
 '  v10: point alignment tries sgVERTPOINTS2D then sgVERTICAL2D (redundant one is undone);
 '  v9: correct sketch-status codes; point alignment via sgHORIZONTAL2D/sgVERTICAL2D;
 '  v8: every sketch fully defined with the drawing's dimensions; names Step N / Sketch N;
@@ -540,6 +541,15 @@ Sub Dim2(ByVal kind As String, ByVal tx As Double, ByVal ty As Double, ByVal tz 
     swModel.ClearSelection2 True
 End Sub
 
+Sub DimToBaseEdge(ByVal px As Double, ByVal py As Double, ByVal pz As Double, ByVal tx As Double, ByVal ty As Double, ByVal tz As Double)
+    ' horizontal dimension (= 111) from a sketch point to the base plate's back-right vertical edge.
+    ' That edge (X = 111, Z = 0, Y 0..20) is never touched by a later feature, so the reference is permanent.
+    swModel.ClearSelection2 True
+    SelPt px, py, pz, False
+    swModel.Extension.SelectByID2 "", "EDGE", BASE_W / 2 / 1000#, BASE_T / 2 / 1000#, 0#, True, 0, Nothing, 0
+    Dim2 "H", tx, ty, tz
+End Sub
+
 Sub Define1()      ' base 222 x 96 on the Top Plane; origin at the middle of the back edge
     SelSeg 0, 0, 0, False:            Rel "sgHORIZONTAL2D"                 ' back edge
     SelSeg 0, 0, BASE_D, False:       Rel "sgHORIZONTAL2D"                 ' front edge
@@ -560,26 +570,26 @@ Sub Define2()      ' pad 120 x 96 on the base bottom face
     SelSeg PAD_W / 2, 0, 48, False:   Dim2 "V", PAD_W / 2 + 15, 0, 48      ' 96
 End Sub
 
-Sub Define3()      ' dia 22 hole, 52 from the origin (= 44 from the front edge)
-    SelSeg 11, BASE_T, HOLE22_Z, False: Dim2 "D", 25, BASE_T, HOLE22_Z + 20              ' dia 22
-    SelOrigin False: SelPt 0, BASE_T, HOLE22_Z, True: RelPts False                        ' centre on the centreline
-    SelOrigin False: SelPt 0, BASE_T, HOLE22_Z, True: Dim2 "V", 30, BASE_T, HOLE22_Z / 2  ' 52
+Sub Define3()      ' dia 22 hole: 52 from the origin (= 44 from the front edge), on the centreline
+    SelSeg 11, BASE_T, HOLE22_Z, False: Dim2 "D", 25, BASE_T, HOLE22_Z + 20                        ' dia 22
+    SelOrigin False: SelPt 0, BASE_T, HOLE22_Z, True: Dim2 "V", 30, BASE_T, HOLE22_Z / 2            ' 52
+    DimToBaseEdge 0, BASE_T, HOLE22_Z, 55, BASE_T, HOLE22_Z + 30                                    ' 111 to base edge
 End Sub
 
 Sub Define4(ByVal TX As Double, ByVal TY As Double)   ' arch wall outline on the Front Plane
-    SelSeg 0, BASE_T, 0, False:              Rel "sgHORIZONTAL2D"                          ' bottom
-    SelSeg 98, (BASE_T + CY) / 2, 0, False:  Rel "sgVERTICAL2D"                            ' right side
-    SelSeg -98, (BASE_T + CY) / 2, 0, False: Rel "sgVERTICAL2D"                            ' left side
-    SelSeg 98, (BASE_T + CY) / 2, 0, False: SelSeg -98, (BASE_T + CY) / 2, 0, True: Rel "sgEQUAL"
+    SelSeg 0, BASE_T, 0, False:              Rel "sgHORIZONTAL2D"                                    ' bottom
+    SelSeg 98, (BASE_T + CY) / 2, 0, False:  Rel "sgVERTICAL2D"                                      ' right side
+    SelSeg -98, (BASE_T + CY) / 2, 0, False: Rel "sgVERTICAL2D"                                      ' left side
     SelSeg 0, CY + R_OUT, 0, False: SelSeg (98 + TX) / 2, (CY + TY) / 2, 0, True: Rel "sgTANGENT"    ' arc / right slope
     SelSeg 0, CY + R_OUT, 0, False: SelSeg -(98 + TX) / 2, (CY + TY) / 2, 0, True: Rel "sgTANGENT"   ' arc / left slope
-    SelOrigin False: SelPt 0, CY, 0, True:   RelPts False                                  ' arc centre above origin
-    SelSeg 0, CY + R_OUT, 0, False:          Dim2 "R", 45, CY + 70, 0                      ' R59
-    SelSeg 0, BASE_T, 0, False:              Dim2 "H", 0, BASE_T - 15, 0                   ' 196
-    SelSeg 98, (BASE_T + CY) / 2, 0, False:  Dim2 "V", 115, (BASE_T + CY) / 2, 0           ' 35
-    SelOrigin False: SelPt 0, CY, 0, True:   Dim2 "V", -20, CY / 2, 0                      ' 55 (arc centre height)
-    SelOrigin False: SelSeg 0, BASE_T, 0, True: Dim2 "V", 20, BASE_T / 2, 0                ' 20 (base top)
-    SelOrigin False: SelSeg 98, (BASE_T + CY) / 2, 0, True: Dim2 "H", 49, 5, 0             ' 98 (half width)
+    SelSeg 0, CY + R_OUT, 0, False:          Dim2 "R", 45, CY + 70, 0                                ' R59
+    SelSeg 0, BASE_T, 0, False:              Dim2 "H", 0, BASE_T - 15, 0                             ' 196
+    SelSeg 98, (BASE_T + CY) / 2, 0, False:  Dim2 "V", 115, (BASE_T + CY) / 2, 0                     ' 35 right
+    SelSeg -98, (BASE_T + CY) / 2, 0, False: Dim2 "V", -115, (BASE_T + CY) / 2, 0                    ' 35 left
+    SelOrigin False: SelPt 0, CY, 0, True:   Dim2 "V", -20, CY / 2, 0                                ' 55 (arc centre height)
+    SelOrigin False: SelSeg 0, BASE_T, 0, True: Dim2 "V", 20, BASE_T / 2, 0                          ' 20 (base top)
+    SelOrigin False: SelSeg 98, (BASE_T + CY) / 2, 0, True: Dim2 "H", 49, 5, 0                       ' 98 (half width)
+    DimToBaseEdge 0, CY, 0, 55, CY + 8, 0                                                            ' 111: arc centre to base edge
 End Sub
 
 Sub Define5()      ' horseshoe band + boss on the wall front face (Z = 14)
@@ -590,13 +600,13 @@ Sub Define5()      ' horseshoe band + boss on the wall front face (Z = 14)
     SelSeg 0, CY + R_IN, z, False:  SelSeg LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"
     SelSeg 0, CY + R_OUT, z, False: SelSeg -LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"       ' left lobe
     SelSeg 0, CY + R_IN, z, False:  SelSeg -LOBE_X, CY - LOBE_R, z, True: Rel "sgTANGENT"
-    SelPt 0, CY, z, False: SelPt LOBE_X, CY, z, True:  RelPts True                              ' lobe centres level with arch centre
-    SelPt 0, CY, z, False: SelPt -LOBE_X, CY, z, True: RelPts True
-    SelOrigin False: SelPt 0, CY, z, True:             RelPts False                             ' centre above origin
     SelSeg 0, CY + R_OUT, z, False: Dim2 "R", 50, CY + 70, z                                    ' R59
     SelSeg 0, CY + R_IN, z, False:  Dim2 "R", 20, CY + 40, z                                    ' R24
     SelSeg BOSS_R, CY, z, False:    Dim2 "D", 25, CY - 25, z                                    ' dia 32
-    SelOrigin False: SelPt 0, CY, z, True: Dim2 "V", -75, CY / 2, z                             ' 55
+    SelOrigin False: SelPt 0, CY, z, True:       Dim2 "V", -75, CY / 2, z                       ' 55 arch centre
+    SelOrigin False: SelPt LOBE_X, CY, z, True:  Dim2 "V", LOBE_X + 30, CY / 2, z               ' 55 right lobe centre
+    SelOrigin False: SelPt -LOBE_X, CY, z, True: Dim2 "V", -LOBE_X - 30, CY / 2, z              ' 55 left lobe centre
+    DimToBaseEdge 0, CY, z, 55, CY + 8, z                                                       ' 111 to base edge
 End Sub
 
 Sub Define6()      ' through slot on the band front face (Z = 28)
@@ -606,19 +616,19 @@ Sub Define6()      ' through slot on the band front face (Z = 28)
     SelSeg 0, CY + SLOT_RI, z, False: SelSeg LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
     SelSeg 0, CY + SLOT_RO, z, False: SelSeg -LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
     SelSeg 0, CY + SLOT_RI, z, False: SelSeg -LOBE_X, CY - SLOT_LR, z, True: Rel "sgTANGENT"
-    SelPt 0, CY, z, False: SelPt LOBE_X, CY, z, True:  RelPts True
-    SelPt 0, CY, z, False: SelPt -LOBE_X, CY, z, True: RelPts True
-    SelOrigin False: SelPt 0, CY, z, True:             RelPts False
     SelSeg 0, CY + SLOT_RO, z, False: Dim2 "R", 45, CY + 60, z                                  ' R48
     SelSeg 0, CY + SLOT_RI, z, False: Dim2 "R", 25, CY + 45, z                                  ' R35
-    SelOrigin False: SelPt 0, CY, z, True: Dim2 "V", -75, CY / 2, z                             ' 55
+    SelOrigin False: SelPt 0, CY, z, True:       Dim2 "V", -75, CY / 2, z                       ' 55 arch centre
+    SelOrigin False: SelPt LOBE_X, CY, z, True:  Dim2 "V", LOBE_X + 30, CY / 2, z               ' 55 right lobe centre
+    SelOrigin False: SelPt -LOBE_X, CY, z, True: Dim2 "V", -LOBE_X - 30, CY / 2, z              ' 55 left lobe centre
+    DimToBaseEdge 0, CY, z, 55, CY + 8, z                                                       ' 111 to base edge
 End Sub
 
 Sub Define7()      ' dia 16 through hole on the boss face
     Dim z As Double: z = WALL_T + BAND_T
     SelSeg HOLE16_R, CY, z, False:         Dim2 "D", 20, CY - 20, z                             ' dia 16
-    SelOrigin False: SelPt 0, CY, z, True: RelPts False
     SelOrigin False: SelPt 0, CY, z, True: Dim2 "V", -75, CY / 2, z                             ' 55
+    DimToBaseEdge 0, CY, z, 55, CY + 8, z                                                       ' 111 to base edge
 End Sub
 
 Function PlaneX() As Double
