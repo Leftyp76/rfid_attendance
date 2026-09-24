@@ -18,6 +18,7 @@
 '   - Right Plane  = plane of symmetry (everything is mirrored about it)
 '   - Origin       = centre of the back edge of the base-plate bottom face
 '
+'  v10: point alignment tries sgVERTPOINTS2D then sgVERTICAL2D (redundant one is undone);
 '  v9: correct sketch-status codes; point alignment via sgHORIZONTAL2D/sgVERTICAL2D;
 '  v8: every sketch fully defined with the drawing's dimensions; names Step N / Sketch N;
 '  v7: volume check after every step (auto-reverses a boss that went the wrong way); Desktop/OneDrive-aware save; points passed by value; normal sketch mode; robust save.
@@ -485,11 +486,38 @@ Sub Rel(ByVal relName As String)
 End Sub
 
 Sub RelPts(ByVal horizontal As Boolean)
-    ' align the two selected points horizontally / vertically (sketch axes)
-    Dim before As Long
+    ' align the two selected points horizontally / vertically (sketch axes).
+    ' SOLIDWORKS names the point-to-point relation sgHORIZPOINTS2D / sgVERTPOINTS2D; as a fallback the
+    ' line-style name is tried too.  Whichever turns out redundant over-defines the sketch and is undone.
+    Dim before As Long, sel As Object, i As Integer, n As Integer
+    Dim ptName As String, lnName As String, objs() As Object
+    If horizontal Then ptName = "sgHORIZPOINTS2D": lnName = "sgHORIZONTAL2D" Else ptName = "sgVERTPOINTS2D": lnName = "sgVERTICAL2D"
+    On Error Resume Next
+    Set sel = swModel.SelectionManager
+    n = sel.GetSelectedObjectCount2(-1)
+    If n >= 1 Then
+        ReDim objs(n - 1)
+        For i = 1 To n
+            Set objs(i - 1) = sel.GetSelectedObject6(i, -1)
+        Next
+    End If
+    On Error GoTo 0
+    If n < 2 Then swModel.ClearSelection2 True: Exit Sub
     before = SkStatus()
     On Error Resume Next
-    If horizontal Then swModel.SketchAddConstraints "sgHORIZONTAL2D" Else swModel.SketchAddConstraints "sgVERTICAL2D"
+    swModel.SketchAddConstraints ptName
+    On Error GoTo 0
+    If Bad(SkStatus()) And Not Bad(before) Then swModel.EditUndo2 1
+    ' re-select the same two points and try the line-style name (redundant -> undone)
+    swModel.ClearSelection2 True
+    On Error Resume Next
+    For i = 0 To n - 1
+        If Not objs(i) Is Nothing Then objs(i).Select4 True, Nothing
+    Next
+    On Error GoTo 0
+    before = SkStatus()
+    On Error Resume Next
+    swModel.SketchAddConstraints lnName
     On Error GoTo 0
     If Bad(SkStatus()) And Not Bad(before) Then swModel.EditUndo2 1
     swModel.ClearSelection2 True
