@@ -19,6 +19,7 @@
 '   - Right: .25, 3.00, .25, R.25, 2 X R.125, .025 X 45 deg TYP
 '   - Title block: 316 STAINLESS STEEL, today's date, title, SHEET 1 OF 4.
 '
+'  v4: always leaves Edit Sheet Format mode and redraws before saving (fixes the blank PDF)
 '  v3: circles seen side-on count as straight lines (fixes the Top 1.50)
 '  v2: view outlines measured from exact edge end points (fixes the MISSING straight-edge dimensions)
 '
@@ -91,10 +92,7 @@ Sub main()
     curStep = "Step 9 - Right view dimensions":       DimRight
     curStep = "Step 10 - title block":                TitleBlock
 
-    curStep = "Step 11 - finish"
-    swModel.ClearSelection2 True
-    swModel.ForceRebuild3 False
-    swModel.ViewZoomtofit2
+    curStep = "Step 11 - finish":                     FinishSheet
 
     MsgBox "HW#7A drawing built." & vbCrLf & vbCrLf & _
            "Checks passed: " & nOK & "      problems: " & nBad & vbCrLf & vbCrLf & _
@@ -845,6 +843,9 @@ Sub TitleBlock()
         On Error GoTo 0
         If gotM And gotD And gotT And sheetDone Then Exit For
     Next
+    On Error Resume Next
+    swDraw.EditSheet                                    ' make sure we are NOT left in Edit Sheet Format mode
+    On Error GoTo 0
 
     ' fall back to the reference layout if a label was not found
     If Not gotM Then mX = 5.07: mY = 0.94
@@ -858,6 +859,28 @@ Sub TitleBlock()
     AddSheetNote "IME 1140 ENGINEERING DRAWINGS I", tX + 0.44, tY, "Title line 1"
     AddSheetNote "IN-LAB ASSIGNMENT #7A", tX + 0.44, tY - 0.17, "Title line 2"
     Check sheetDone, "SHEET 1 OF 4" & IIf(sheetDone, "", IIf(sheetSeen, " - the note would not change; edit it by hand", " - sheet note not found; edit it by hand"))
+End Sub
+
+Sub FinishSheet()
+    ' leave the drawing active, in normal sheet mode, with all four views shown and redrawn
+    Dim vs As Variant, n As Long, i As Long, v As Variant
+    On Error Resume Next
+    ActivateDrawing
+    swDraw.EditSheet
+    swModel.ClearSelection2 True
+    For Each v In Array(viewFront, viewTop, viewRight, viewIso)
+        If Not v Is Nothing Then
+            If Not v.GetVisible Then v.SetVisible True, True
+        End If
+    Next
+    swModel.ForceRebuild3 False
+    swModel.GraphicsRedraw2
+    swModel.ViewZoomtofit2
+    vs = swDraw.GetCurrentSheet.GetViews
+    n = -1
+    If IsArray(vs) Then n = UBound(vs) - LBound(vs) + 1
+    On Error GoTo 0
+    If n >= 0 Then Check (n >= 4), n & " views on the sheet (expected 4)"
 End Sub
 
 Sub AddSheetNote(ByVal text As String, ByVal x As Double, ByVal y As Double, ByVal label As String)
@@ -893,6 +916,7 @@ Sub SaveAll()
         Exit Sub
     End If
     pdf = folder & "HW#7A" & lastName & ".PDF"
+    FinishSheet                                         ' views visible + drawing active before the PDF export
     okPdf = TrySavePdf(pdf)
     WriteReport folder
     MsgBox "Saved:" & vbCrLf & drw & vbCrLf & IIf(okPdf, pdf, "PDF NOT saved - use File > Save As > PDF"), _
