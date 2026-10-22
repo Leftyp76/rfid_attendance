@@ -18,6 +18,7 @@
 '   - Right:   2.000, 1.250, (.375), .60, .025 X 45 deg TYP
 '   - Title block: 6061-T6 ALUMINUM, today's date, title, SHEET 2 OF 4.
 '
+'  v5: SECTION B-B label found among all sheet annotations
 '  v4: slot picks moved off the cutting line; views placed by real edges; section label moved down
 '  v3: picks the open part named Part #2 even when other parts/drawings are open
 '  v2: cutting line selected directly (screen picking failed on a just-drawn line)
@@ -622,21 +623,43 @@ Sub DimSection()
     MoveSectionLabel
 End Sub
 
-' the "SECTION B-B" label sits just under the view by default, on top of the 1.625 and dia .290
+' the "SECTION B-B" label sits just under the view by default, on top of the 1.625 and dia .290.
+' SolidWorks does not keep it with the view's notes, so every annotation on the sheet is searched.
 Sub MoveSectionLabel()
-    Dim nt As Object, p As Variant, moved As Boolean
+    Dim v As Object, anns As Variant, i As Long, t As String, p As Variant, moved As Boolean, nt As Object
     On Error Resume Next
-    Set nt = viewSec.GetFirstNote
-    Do While Not nt Is Nothing
-        If InStr(UCase(nt.GetText), "SECTION") > 0 Then
-            p = nt.GetAnnotation.GetPosition
-            If IsArray(p) Then
-                nt.GetAnnotation.SetPosition2 p(0), p(1) - 0.32 * IN_M, 0#
-                moved = True
-            End If
-            Exit Do
+    swModel.ForceRebuild3 False
+    Set v = swDraw.GetFirstView                         ' the sheet, then each drawing view
+    Do While Not v Is Nothing And Not moved
+        anns = Empty
+        anns = v.GetAnnotations
+        If IsArray(anns) Then
+            For i = LBound(anns) To UBound(anns)
+                t = ""
+                t = UCase(anns(i).GetSpecificAnnotation.GetText)
+                If Len(t) = 0 Then t = UCase(anns(i).GetTextAtIndex(0))
+                If InStr(t, "SECTION") > 0 And InStr(t, "B") > 0 Then
+                    p = anns(i).GetPosition
+                    If IsArray(p) Then
+                        anns(i).SetPosition2 p(0), p(1) - 0.32 * IN_M, 0#
+                        moved = True
+                        Exit For
+                    End If
+                End If
+            Next
         End If
-        Set nt = nt.GetNext
+        If Not moved Then                               ' older style: notes list
+            Set nt = v.GetFirstNote
+            Do While Not nt Is Nothing
+                If InStr(UCase(nt.GetText), "SECTION") > 0 Then
+                    p = nt.GetAnnotation.GetPosition
+                    If IsArray(p) Then nt.GetAnnotation.SetPosition2 p(0), p(1) - 0.32 * IN_M, 0#: moved = True
+                    Exit Do
+                End If
+                Set nt = nt.GetNext
+            Loop
+        End If
+        Set v = v.GetNextView
     Loop
     On Error GoTo 0
     Check moved, "SECTION B-B label moved below the dimensions" & IIf(moved, "", " - drag it down about 1/3 in by hand")
