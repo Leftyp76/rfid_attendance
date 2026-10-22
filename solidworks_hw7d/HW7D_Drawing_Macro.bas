@@ -13,6 +13,8 @@
 '   - Detail E: .07, .16, 30 deg, dia .650, dia .492, dia .625, .100, .050
 '   - Title block: C36000 BRASS, today's date, title, SHEET 4 OF 4
 '
+'  v2: DETAIL E tried several ways and reports why; last resort a cropped 2:1 copy with label notes
+'
 '  SAFETY
 '   - Part orientation read from the dia .925 body and the dia .625 pin.
 '   - Edges picked from exact positions; cylinder outlines first, side-on circle edges as a fallback.
@@ -297,39 +299,115 @@ Function StdIsoName() As String
     If Near(vR, 1, 0, 0) And Near(vU, 0, 1, 0) And Near(vF, 0, 0, 1) Then StdIsoName = "*Isometric"
 End Function
 
-' DETAIL E: sketch a circle round the groove in the main view, then make the 2:1 detail from it
+' DETAIL E: sketch a circle round the groove in the main view, then make the 2:1 detail from it.
+' Several ways are tried; if SolidWorks refuses them all, a 2:1 copy of the view cropped to the circle
+' is made instead (same picture), with the E label and DETAIL E caption added as notes.
 Function MakeDetail() As Object
     Dim c As Variant, rad As Double, cand As Variant, seg As Object, dv As Object, before As String, sc As Double
+    Dim combo As Integer, diag As String, nSel As Long, used As String
 
     c = SheetPt(viewMain, 3.06, 0#, 0#)                            ' circle centre (groove), sheet inches
     sc = 1#: On Error Resume Next: sc = viewMain.ScaleDecimal: On Error GoTo 0
     If sc <= 0 Then sc = 1#
-    rad = 0.56 * sc                                                ' circle radius on the sheet
+    rad = 0.56 * sc
     before = ViewNames()
-    For Each cand In Array(2, 3, 1)                                ' the view sketch's coordinates: try each way
+    For Each cand In Array(2, 3, 1)
         Set seg = DrawViewCircle(viewMain, c, rad, CInt(cand))
-        If Not seg Is Nothing Then
-            swModel.ClearSelection2 True
-            On Error Resume Next
-            seg.Select4 False, Nothing
-            Set dv = Nothing
-            Set dv = swDraw.CreateDetailViewAt4(DET_X * IN_M + 1.5 * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, False, False, False, 0)
-            If dv Is Nothing Then Err.Clear: Set dv = swDraw.CreateDetailViewAt3(DET_X * IN_M + 1.5 * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, False)
-            On Error GoTo 0
-            If dv Is Nothing Then Set dv = NewViewSince(before)           ' built but not handed back
+        If seg Is Nothing Then
+            diag = diag & "method " & cand & ": circle not drawn. "
+        Else
+            For combo = 1 To 4
+                nSel = SelectSeg(seg, c(0) + rad, c(1))
+                If nSel = 0 Then diag = diag & "method " & cand & ": circle not selectable. ": Exit For
+                Set dv = Nothing
+                On Error Resume Next
+                Select Case combo
+                    Case 1: Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, False, False, False, 1)
+                    Case 2: Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 0, False, False, False, 1)
+                    Case 3: Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, False)
+                    Case 4: Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 0, False)
+                End Select
+                Err.Clear
+                On Error GoTo 0
+                If dv Is Nothing Then Set dv = NewViewSince(before)       ' built but not handed back
+                If Not dv Is Nothing Then used = "method " & cand & ", option " & combo: Exit For
+            Next
             If Not dv Is Nothing Then Exit For
+            If combo > 4 Then diag = diag & "method " & cand & ": detail command refused. "
             DeleteSeg seg
         End If
     Next
     swModel.ClearSelection2 True
+
     If dv Is Nothing Then
-        Check False, "DETAIL E: SolidWorks would not make the detail view"
-        Exit Function
+        Set dv = CroppedDetail(c, rad)
+        If dv Is Nothing Then
+            Check False, "DETAIL E: SolidWorks would not make the detail view (" & Trim(diag) & ")"
+            Exit Function
+        End If
+        Check False, "DETAIL E made as a 2:1 copy cropped to a circle (the detail command was refused: " & Trim(diag) & _
+                     "). It prints the same; the E label and caption are notes"
+    Else
+        Check True, "DETAIL E created (" & used & ")"
     End If
-    Check True, "DETAIL E created from a circle round the groove (method " & cand & ")"
     sc = 0: On Error Resume Next: sc = dv.ScaleDecimal: On Error GoTo 0
     Check (Abs(sc - 2#) < 0.01), "DETAIL E scale 2:1" & IIf(Abs(sc - 2#) < 0.01, "", " (it is " & Format(sc, "0.##") & ") - set the view scale to 2:1 by hand")
     Set MakeDetail = dv
+End Function
+
+' select a sketch segment: the object itself, else by clicking on it; returns how many are selected
+Function SelectSeg(seg As Object, ByVal px As Double, ByVal py As Double) As Long
+    swModel.ClearSelection2 True
+    On Error Resume Next
+    seg.Select4 False, Nothing
+    If swModel.SelectionManager.GetSelectedObjectCount2(-1) = 0 Then
+        swModel.Extension.SelectByID2 "", "SKETCHSEGMENT", px * IN_M, py * IN_M, 0#, False, 0, Nothing, 0
+    End If
+    SelectSeg = swModel.SelectionManager.GetSelectedObjectCount2(-1)
+End Function
+
+' fallback for DETAIL E: the circle stays in the main view, a 2:1 copy of the view is cropped to it
+Function CroppedDetail(c As Variant, ByVal rad As Double) As Object
+    Dim dv As Object, cand As Variant, seg As Object, cc As Variant, ok As Boolean, ring As Object, nt As Object
+    Dim sc As Double
+
+    ' circle in the main view (kept), with its E label
+    For Each cand In Array(2, 3, 1)
+        Set ring = DrawViewCircle(viewMain, c, rad, CInt(cand))
+        If Not ring Is Nothing Then Exit For
+    Next
+    ' 2:1 copy of the main view
+    Set dv = OrientedView("HW7D_Det", vR, vU, vF, DET_X + 1.5, DET_Y, StdFrontName(), False)
+    If dv Is Nothing Then Exit Function
+    On Error Resume Next
+    dv.ScaleRatio = Array(2#, 1#)
+    If Abs(dv.ScaleDecimal - 2#) > 0.01 Then dv.ScaleDecimal = 2#
+    swModel.ForceRebuild3 False
+    On Error GoTo 0
+    PlaceView dv, X_NECK, 0#, 0#, DET_X, DET_Y, True, True, "DETAIL E copy placed"
+    ' crop it to a circle round the groove
+    cc = SheetPt(dv, 3.06, 0#, 0#)
+    sc = 2#: On Error Resume Next: sc = dv.ScaleDecimal: On Error GoTo 0
+    For Each cand In Array(2, 3, 1)
+        Set seg = DrawViewCircle(dv, cc, 0.56 * sc, CInt(cand))
+        If Not seg Is Nothing Then
+            If SelectSeg(seg, cc(0) + 0.56 * sc, cc(1)) > 0 Then
+                On Error Resume Next
+                ok = swDraw.CropView
+                On Error GoTo 0
+                If ok Then Exit For
+            End If
+            DeleteSeg seg
+        End If
+    Next
+    Check ok, "DETAIL E copy cropped to the circle" & IIf(ok, "", " - crop it by hand (sketch a circle, Crop View)")
+    ' labels: E above the circle in the main view, caption under the detail
+    swDraw.ActivateSheet swDraw.GetCurrentSheet.GetName
+    AddSheetNote "E", c(0) - 0.05, c(1) + rad + 0.2, "DETAIL E: letter E on the main view circle"
+    AddSheetNote "DETAIL E", cc(0) - 0.6, cc(1) - 0.56 * sc - 0.45, "DETAIL E caption"
+    AddSheetNote "SCALE 2 : 1", cc(0) - 0.65, cc(1) - 0.56 * sc - 0.62, "DETAIL E scale caption"
+    swModel.ClearSelection2 True
+    Set CroppedDetail = dv
 End Function
 
 ' sketch a circle in a drawing view; c = centre (sheet inches), rad = radius (sheet inches)
