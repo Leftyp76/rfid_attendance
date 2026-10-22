@@ -13,6 +13,7 @@
 '   - Detail E: .07, .16, 30 deg, dia .650, dia .492, dia .625, .100, .050
 '   - Title block: C36000 BRASS, today's date, title, SHEET 4 OF 4
 '
+'  v7: main view dimensioned before DETAIL E is made (a detail makes SolidWorks double-select main-view edges)
 '  v6: a pick keeps only the selection in the view being dimensioned (parent + detail double-select)
 '  v5: centrelines added after all dimensions (the centreline command swallowed the main-view dimensions);
 '      extra way to dimension a diameter
@@ -80,6 +81,7 @@ Sub main()
     Set swApp = Application.SldWorks
     Set swMath = swApp.GetMathUtility
     report = "": problems = "": nOK = 0: nBad = 0: detailPending = False: resumed = False
+    Set viewMain = Nothing: Set viewDet = Nothing: Set viewIso = Nothing   ' VBA keeps these between runs
 
     curStep = "Step 1 - find the open part":           FindPart
     curStep = "Step 2 - read the part orientation":    FindOrientation
@@ -89,17 +91,29 @@ Sub main()
     Else
         curStep = "Step 3 - find your template":       tmpl = FindTemplate()
         curStep = "Step 4 - new drawing":              NewDrawing tmpl
-        curStep = "Step 5 - views and DETAIL E":       MakeViews
+        curStep = "Step 5 - main view":                MakeViews
     End If
+    ' the main view is dimensioned BEFORE DETAIL E exists: once a detail is taken from it, SolidWorks
+    ' selects every main-view edge in the detail too, and refuses the dimensions
     curStep = "Step 6 - main view dimensions"
     ClearCommand
     If HasDims(viewMain) Then
         Check True, "Main view dimensions already there - left as they are"
+    ElseIf Not viewDet Is Nothing Then
+        Check False, "Main view dimensions: this drawing already has DETAIL E, which blocks them. Close it without saving " & _
+                     "and run the macro on a fresh drawing (it dimensions the main view before making DETAIL E)"
     Else
         DimMain
     End If
+    If Not resumed Then
+        curStep = "Step 7 - DETAIL E"
+        ClearCommand
+        Set viewDet = MakeDetail()
+        If viewDet Is Nothing Then detailPending = True
+        FinishViews
+    End If
     If Not viewDet Is Nothing Then
-        curStep = "Step 7 - DETAIL E dimensions"
+        curStep = "Step 8 - DETAIL E dimensions"
         ClearCommand
         If HasDims(viewDet) Then Check True, "DETAIL E dimensions already there - left as they are" Else DimDetail
     End If
@@ -344,9 +358,6 @@ Sub MakeViews()
     SetMode viewMain, DM_HIDDEN_REMOVED, "Main"
     PlaceView viewMain, 0#, 0#, 0#, MAIN_X, MAIN_Y, True, True, "Main view placed (left end, centre line)"
 
-    Set viewDet = MakeDetail()
-    If viewDet Is Nothing Then detailPending = True
-    FinishViews
 End Sub
 
 ' detail placement and the isometric view (also used when continuing an open drawing)
