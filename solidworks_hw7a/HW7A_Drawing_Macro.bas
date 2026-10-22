@@ -19,6 +19,7 @@
 '   - Right: .25, 3.00, .25, R.25, 2 X R.125, .025 X 45 deg TYP
 '   - Title block: 316 STAINLESS STEEL, today's date, title, SHEET 1 OF 4.
 '
+'  v3: circles seen side-on count as straight lines (fixes the Top 1.50)
 '  v2: view outlines measured from exact edge end points (fixes the MISSING straight-edge dimensions)
 '
 '  SAFETY
@@ -709,9 +710,26 @@ Sub AddEdge(ByVal ent As Object, xf As Object, ByVal sc As Double)
         On Error GoTo 0
         If Not IsArray(cc) Then Exit Sub
         axv = XfVec(xf, Arr3(cc(3), cc(4), cc(5)))
-        If Abs(axv(2)) < 0.9 Then Exit Sub            ' circle seen edge-on
         ctr = XfPt(xf, cc(0), cc(1), cc(2))
         rr = cc(6) / IN_M * sc
+        If Abs(axv(2)) < 0.1 Then
+            ' circle or arc seen exactly side-on: on the sheet it is a straight line
+            Dim dx As Double, dy As Double, dl As Double
+            If Abs(a(0) - b(0)) + Abs(a(1) - b(1)) < 0.0005 Then    ' full circle: centre +- radius
+                dx = -axv(1): dy = axv(0): dl = Sqr(dx * dx + dy * dy)
+                If dl < 0.000001 Then Exit Sub
+                a = Arr3(ctr(0) - rr * dx / dl, ctr(1) - rr * dy / dl, 0#)
+                b = Arr3(ctr(0) + rr * dx / dl, ctr(1) + rr * dy / dl, 0#)
+            End If
+            L = Sqr((b(0) - a(0)) ^ 2 + (b(1) - a(1)) ^ 2)
+            If L < 0.003 Then Exit Sub
+            Extend a: Extend b
+            Set eObj(eN) = ent: eKind(eN) = "L"
+            eX1(eN) = a(0): eY1(eN) = a(1): eX2(eN) = b(0): eY2(eN) = b(1)
+            eN = eN + 1
+            Exit Sub
+        End If
+        If Abs(axv(2)) < 0.9 Then Exit Sub            ' seen at an angle (isometric): not used
         Extend a: Extend b
         Extend Arr3(ctr(0) - rr, ctr(1) - rr, 0#)
         Extend Arr3(ctr(0) + rr, ctr(1) + rr, 0#)
