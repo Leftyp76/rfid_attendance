@@ -13,6 +13,8 @@
 '   - Detail E: .07, .16, 30 deg, dia .650, dia .492, dia .625, .100, .050
 '   - Title block: C36000 BRASS, today's date, title, SHEET 4 OF 4
 '
+'  v5: centrelines added after all dimensions (the centreline command swallowed the main-view dimensions);
+'      extra way to dimension a diameter
 '  v4: one run does all it can; DETAIL E by hand if refused, second run adds only what is missing;
 '      normal sheet mode + refresh before dimensioning; edge counts in the report
 '  v3: DETAIL E circle placed relative to the view centre and checked; continue-mode if made by hand;
@@ -89,7 +91,7 @@ Sub main()
         curStep = "Step 5 - views and DETAIL E":       MakeViews
     End If
     curStep = "Step 6 - main view dimensions"
-    CentreLines viewMain
+    ClearCommand
     If HasDims(viewMain) Then
         Check True, "Main view dimensions already there - left as they are"
     Else
@@ -97,9 +99,13 @@ Sub main()
     End If
     If Not viewDet Is Nothing Then
         curStep = "Step 7 - DETAIL E dimensions"
-        CentreLines viewDet
+        ClearCommand
         If HasDims(viewDet) Then Check True, "DETAIL E dimensions already there - left as they are" Else DimDetail
     End If
+    curStep = "Step 8 - centrelines"                  ' last: the centreline command can swallow later clicks
+    CentreLines viewMain
+    If Not viewDet Is Nothing Then CentreLines viewDet
+    ClearCommand
     curStep = "Step 8 - title block"
     If SheetHasText("C36000 BRASS") Then Check True, "Title block already filled in - left as it is" Else TitleBlock
     curStep = "Step 9 - finish":                       FinishSheet
@@ -124,6 +130,15 @@ Fail:
            "Error " & Err.Number & ": " & Err.Description & vbCrLf & vbCrLf & _
            "Checks passed so far: " & nOK & vbCrLf & _
            IIf(nBad = 0, "", "Problems so far:" & vbCrLf & Left(problems, 500)), vbCritical, DRAW_NAME & " macro"
+End Sub
+
+' leave any half-finished command and selection, back to plain sheet editing
+Sub ClearCommand()
+    On Error Resume Next
+    swModel.ClearSelection2 True
+    swDraw.ActivateSheet swDraw.GetCurrentSheet.GetName
+    swModel.ClearSelection2 True
+    swModel.GraphicsRedraw2
 End Sub
 
 ' does this view already carry dimensions (from an earlier run)?
@@ -740,6 +755,9 @@ Sub DiaDim(v As Object, ByVal xs As Double, ByVal rr As Double, ByVal xe As Doub
     If Len(why) > 0 And xe >= 0 Then
         why = TryDim(v, "VL", Array(xe, re, 0#), Empty, tx, ty, expect, "<MOD-DIAM>", prec, "", False, True)
     End If
+    If Len(why) > 0 And xe >= 0 Then
+        why = TryDim(v, "S1", Array(xe, re, 0#), Empty, tx, ty, expect, "<MOD-DIAM>", prec, "", False, True)
+    End If
     Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - " & why)
 End Sub
 
@@ -759,12 +777,18 @@ Sub DiaByEdge(v As Object, xs As Variant, ByVal dia As Double, ByVal tx As Doubl
             End If
         Next
     Next
-    If best < 0 Then Check False, label & "  - MISSING (no " & Format(dia, ".000") & " circle edge found)": Exit Sub
+    If best < 0 Then Check False, label & "  - MISSING (no " & Format(dia, ".000") & " circle edge found). Add it by hand: Smart Dimension on the groove's two outline lines, then add " & ChrW(216) & " in front": Exit Sub
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
     SelEdge v, best, False
     why = TryDimSel("VL", 1, tx, ty, dia, "<MOD-DIAM>", prec, "", False, True)
-    Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - " & why)
+    If Len(why) > 0 Then
+        swModel.ClearSelection2 True
+        SelEdge v, best, False
+        why = TryDimSel("S1", 1, tx, ty, dia, "<MOD-DIAM>", prec, "", False, True)
+    End If
+    Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - " & why & _
+          ". Add it by hand: Smart Dimension on the groove's two outline lines, then add " & ChrW(216) & " in front")
 End Sub
 
 Sub LeaderNote2(v As Object, p1 As Variant, p2 As Variant, ByVal text As String, ByVal tx As Double, ByVal ty As Double, ByVal label As String)
