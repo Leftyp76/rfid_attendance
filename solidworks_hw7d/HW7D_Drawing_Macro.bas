@@ -13,6 +13,7 @@
 '   - Detail E: .07, .16, 30 deg, dia .650, dia .492, dia .625, .100, .050
 '   - Title block: C36000 BRASS, today's date, title, SHEET 4 OF 4
 '
+'  v6: a pick keeps only the selection in the view being dimensioned (parent + detail double-select)
 '  v5: centrelines added after all dimensions (the centreline command swallowed the main-view dimensions);
 '      extra way to dimension a diameter
 '  v4: one run does all it can; DETAIL E by hand if refused, second run adds only what is missing;
@@ -917,6 +918,7 @@ Function SelPt(v As Object, p As Variant, ByVal append As Boolean) As Boolean
             swModel.Extension.SelectByID2 "", "SILHOUETTE", s(0) * IN_M, s(1) * IN_M, 0#, append, 0, Nothing, 0
         End If
         On Error GoTo 0
+        KeepOneIn v, IIf(append, n0, 0)
     End If
     SelPt = (swModel.SelectionManager.GetSelectedObjectCount2(-1) > IIf(append, n0, 0))
 End Function
@@ -937,16 +939,40 @@ Function EntDist(ByVal i As Long, ByVal x As Double, ByVal y As Double) As Doubl
 End Function
 
 Sub SelEdge(v As Object, ByVal i As Long, ByVal append As Boolean)
-    Dim ok As Boolean, sd As Object
+    Dim ok As Boolean, sd As Object, n0 As Long
     On Error Resume Next
+    n0 = 0
+    If append Then n0 = swModel.SelectionManager.GetSelectedObjectCount2(-1)
     ok = v.SelectEntity(eObj(i), append)
-    If Not ok Then
+    If swModel.SelectionManager.GetSelectedObjectCount2(-1) <= n0 Then
         Err.Clear
         Set sd = swModel.SelectionManager.CreateSelectData
         Set sd.View = v
         If Err.Number <> 0 Then Err.Clear: sd.View = v
         ok = eObj(i).Select4(append, sd)
     End If
+    KeepOneIn v, n0
+End Sub
+
+' After a pick, keep exactly one new selection and only one that belongs to view v.
+' (An edge shown in a parent view and in its detail view gets selected in both.)
+Sub KeepOneIn(v As Object, ByVal n0 As Long)
+    Dim sm As Object, n As Long, i As Long, dv As Object, keptOne As Boolean, nm As String
+    On Error Resume Next
+    Set sm = swModel.SelectionManager
+    nm = v.GetName2
+    n = sm.GetSelectedObjectCount2(-1)
+    For i = n To n0 + 1 Step -1                       ' from the end, so indices stay valid
+        Set dv = Nothing
+        Set dv = sm.GetSelectedObjectsDrawingView2(i, -1)
+        If Not dv Is Nothing Then
+            If dv.GetName2 <> nm Then sm.DeSelect2 i, -1
+        End If
+    Next
+    n = sm.GetSelectedObjectCount2(-1)
+    For i = n To n0 + 2 Step -1                       ' still more than one new item: keep the first
+        sm.DeSelect2 i, -1
+    Next
 End Sub
 
 ' =====================================================================================
