@@ -18,6 +18,7 @@
 '   - Right:   2.000, 1.250, (.375), .60, .025 X 45 deg TYP
 '   - Title block: 6061-T6 ALUMINUM, today's date, title, SHEET 2 OF 4.
 '
+'  v3: picks the open part named Part #2 even when other parts/drawings are open
 '  v2: cutting line selected directly (screen picking failed on a just-drawn line)
 '
 '  SAFETY
@@ -108,27 +109,36 @@ End Sub
 '  Part, template, new drawing
 ' =====================================================================================
 Sub FindPart()
-    Dim d As Object, docs As Variant, i As Long
+    ' Use the open part whose name says Part #2. Otherwise use the active part, otherwise ask.
+    Dim d As Object, docs As Variant, i As Long, t As String, nParts As Long, firstPart As Object
     Set swPart = Nothing
-    Set d = swApp.ActiveDoc
-    If Not d Is Nothing Then
-        If d.GetType = 1 Then Set swPart = d                       ' 1 = swDocPART
+    On Error Resume Next
+    docs = swApp.GetDocuments
+    On Error GoTo 0
+    If IsArray(docs) Then
+        For i = LBound(docs) To UBound(docs)
+            If docs(i).GetType = 1 Then                                ' 1 = swDocPART
+                nParts = nParts + 1
+                If firstPart Is Nothing Then Set firstPart = docs(i)
+                t = UCase(docs(i).GetTitle & " " & docs(i).GetPathName)
+                If InStr(t, "PART #2") > 0 Or InStr(t, "PART_2") > 0 Or InStr(t, "PART 2") > 0 Or InStr(t, "PART #2") > 0 Then
+                    Set swPart = docs(i)
+                End If
+            End If
+        Next
     End If
     If swPart Is Nothing Then
-        On Error Resume Next
-        docs = swApp.GetDocuments
-        On Error GoTo 0
-        If IsArray(docs) Then
-            For i = LBound(docs) To UBound(docs)
-                If docs(i).GetType = 1 Then Set swPart = docs(i): Exit For
-            Next
+        Set d = swApp.ActiveDoc
+        If Not d Is Nothing Then
+            If d.GetType = 1 Then Set swPart = d
         End If
     End If
+    If swPart Is Nothing And nParts = 1 Then Set swPart = firstPart
     If swPart Is Nothing Then Err.Raise vbObjectError + 1, , _
-        "No part is open. Open the In-Lab Assignment Part #2 file first, then run the macro again."
+        "Could not tell which open part is In-Lab Assignment Part #2. Close the other parts (Part #1), click into the Part #2 window, and run the macro again."
     partPath = swPart.GetPathName
     If Len(partPath) = 0 Then Err.Raise vbObjectError + 2, , _
-        "The part has never been saved, so a drawing cannot reference it. Save the part first."
+        "The part has never been saved, so a drawing cannot reference it. Save it first."
     Check True, "Part found: " & Mid(partPath, InStrRev(partPath, "\") + 1)
 End Sub
 
@@ -168,7 +178,7 @@ Sub FindOrientation()
             End If
         Next
     Next
-    If bossN = 0 Then Err.Raise vbObjectError + 4, , "Could not find the dia .75 boss in the part."
+    If bossN = 0 Then Err.Raise vbObjectError + 4, , "This part has no dia .75 boss, so it is not In-Lab Assignment Part #2 (" & Mid(partPath, InStrRev(partPath, "\\") + 1) & "). Click into the Part #2 window and run again."
     If endN = 0 Then Err.Raise vbObjectError + 4, , "Could not find the R1.00 end in the part."
     If xN = 0 Then Err.Raise vbObjectError + 4, , "Could not find the dia .29 cross hole in the part."
     For k = 0 To 2
