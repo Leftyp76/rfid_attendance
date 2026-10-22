@@ -13,6 +13,8 @@
 '   - Detail E: .07, .16, 30 deg, dia .650, dia .492, dia .625, .100, .050
 '   - Title block: C36000 BRASS, today's date, title, SHEET 4 OF 4
 '
+'  v4: one run does all it can; DETAIL E by hand if refused, second run adds only what is missing;
+'      normal sheet mode + refresh before dimensioning; edge counts in the report
 '  v3: DETAIL E circle placed relative to the view centre and checked; continue-mode if made by hand;
 '      dia .650 from its circle edge
 '  v2: DETAIL E tried several ways and reports why; last resort a cropped 2:1 copy with label notes
@@ -60,6 +62,8 @@ Dim vF As Variant                ' toward you in the main view
 Dim pOrg As Variant              ' model point on the axis at the left end
 
 Dim viewMain As Object, viewDet As Object, viewIso As Object
+Dim detailPending As Boolean     ' DETAIL E still to be made by hand
+Dim resumed As Boolean
 
 Dim eN As Long
 Dim eObj() As Object, eKind() As String
@@ -69,35 +73,51 @@ Dim xMin As Double, xMax As Double, yMin As Double, yMax As Double
 
 Sub main()
     On Error GoTo Fail
-    Dim tmpl As String
+    Dim tmpl As String, msg As String
     Set swApp = Application.SldWorks
     Set swMath = swApp.GetMathUtility
-    report = "": problems = "": nOK = 0: nBad = 0
+    report = "": problems = "": nOK = 0: nBad = 0: detailPending = False: resumed = False
 
     curStep = "Step 1 - find the open part":           FindPart
     curStep = "Step 2 - read the part orientation":    FindOrientation
-    curStep = "Step 3 - continue an open drawing?"
-    If ResumeDrawing() Then
+    curStep = "Step 3 - continue an open drawing?":    resumed = ResumeDrawing()
+    If resumed Then
         curStep = "Step 5 - finish the views":         FinishViews
     Else
         curStep = "Step 3 - find your template":       tmpl = FindTemplate()
         curStep = "Step 4 - new drawing":              NewDrawing tmpl
         curStep = "Step 5 - views and DETAIL E":       MakeViews
     End If
-    curStep = "Step 6 - centrelines":                  CentreLines viewMain: CentreLines viewDet
-    curStep = "Step 7 - main view dimensions":         DimMain
-    curStep = "Step 8 - DETAIL E dimensions":          DimDetail
-    curStep = "Step 9 - title block":                  TitleBlock
-    curStep = "Step 10 - finish":                      FinishSheet
+    curStep = "Step 6 - main view dimensions"
+    CentreLines viewMain
+    If HasDims(viewMain) Then
+        Check True, "Main view dimensions already there - left as they are"
+    Else
+        DimMain
+    End If
+    If Not viewDet Is Nothing Then
+        curStep = "Step 7 - DETAIL E dimensions"
+        CentreLines viewDet
+        If HasDims(viewDet) Then Check True, "DETAIL E dimensions already there - left as they are" Else DimDetail
+    End If
+    curStep = "Step 8 - title block"
+    If SheetHasText("C36000 BRASS") Then Check True, "Title block already filled in - left as it is" Else TitleBlock
+    curStep = "Step 9 - finish":                       FinishSheet
 
-    MsgBox DRAW_NAME & " drawing built." & vbCrLf & vbCrLf & _
+    If detailPending Then
+        msg = vbCrLf & vbCrLf & "DETAIL E STILL TO DO (SolidWorks would not let the macro make it):" & vbCrLf & _
+              "  1. Drawing tab > Detail View." & vbCrLf & _
+              "  2. Draw a circle round the groove (from the end of the big body to just past the 30" & ChrW(176) & " chamfer)." & vbCrLf & _
+              "  3. Click above the main view to place it. Label = E, Scale = Use custom scale 2:1. Green check." & vbCrLf & _
+              "  4. Run main again (keep this drawing open): it adds only the DETAIL E dimensions and saves again."
+    End If
+    MsgBox DRAW_NAME & IIf(resumed, " drawing finished.", " drawing built.") & vbCrLf & vbCrLf & _
            "Checks passed: " & nOK & "      problems: " & nBad & vbCrLf & vbCrLf & _
-           IIf(nBad = 0, "Every view, dimension and title block item checked out.", "Problems:" & vbCrLf & Left(problems, 700)) & _
-           vbCrLf & vbCrLf & "The full check list is saved as HW7D_checks.txt next to the drawing." & vbCrLf & _
-           "Next: enter your last name to save the drawing and the PDF.", _
+           IIf(nBad = 0, "Every view, dimension and title block item checked out.", "Problems:" & vbCrLf & Left(problems, 600)) & _
+           msg & vbCrLf & vbCrLf & "Next: enter your last name to save the drawing and the PDF.", _
            IIf(nBad = 0, vbInformation, vbExclamation), DRAW_NAME
 
-    curStep = "Step 11 - save drawing and PDF":        SaveAll
+    curStep = "Step 10 - save drawing and PDF":        SaveAll
     Exit Sub
 Fail:
     MsgBox "The macro stopped at: " & curStep & vbCrLf & vbCrLf & _
@@ -105,6 +125,26 @@ Fail:
            "Checks passed so far: " & nOK & vbCrLf & _
            IIf(nBad = 0, "", "Problems so far:" & vbCrLf & Left(problems, 500)), vbCritical, DRAW_NAME & " macro"
 End Sub
+
+' does this view already carry dimensions (from an earlier run)?
+Function HasDims(v As Object) As Boolean
+    Dim n As Long
+    On Error Resume Next
+    n = 0
+    n = v.GetDisplayDimensionCount
+    HasDims = (n > 0)
+End Function
+
+' is this text already on the sheet (title block filled in by an earlier run)?
+Function SheetHasText(ByVal t As String) As Boolean
+    Dim nt As Object
+    On Error Resume Next
+    Set nt = swDraw.GetFirstView.GetFirstNote
+    Do While Not nt Is Nothing
+        If InStr(UCase(nt.GetText), UCase(t)) > 0 Then SheetHasText = True: Exit Function
+        Set nt = nt.GetNext
+    Loop
+End Function
 
 ' =====================================================================================
 '  Part, template, new drawing
@@ -258,6 +298,9 @@ Sub NewDrawing(ByVal tmpl As String)
     If swModel Is Nothing Then Err.Raise vbObjectError + 7, , "SolidWorks could not create a drawing from " & tmpl
     If swModel.GetType <> 3 Then Err.Raise vbObjectError + 8, , "The template did not create a drawing."
     Set swDraw = swModel
+    On Error Resume Next
+    swDraw.EditSheet
+    On Error GoTo 0
 
     Set sh = swDraw.GetCurrentSheet
     On Error Resume Next
@@ -286,15 +329,23 @@ Sub MakeViews()
     PlaceView viewMain, 0#, 0#, 0#, MAIN_X, MAIN_Y, True, True, "Main view placed (left end, centre line)"
 
     Set viewDet = MakeDetail()
-    If viewDet Is Nothing Then Err.Raise vbObjectError + 11, , "Could not create DETAIL E."
+    If viewDet Is Nothing Then detailPending = True
     FinishViews
 End Sub
 
 ' detail placement and the isometric view (also used when continuing an open drawing)
 Sub FinishViews()
     Dim dv As Variant, upI As Variant, rtI As Variant
-    SetMode viewDet, DM_HIDDEN_REMOVED, "DETAIL E"
-    PlaceView viewDet, X_NECK, 0#, 0#, DET_X, DET_Y, True, True, "DETAIL E placed (groove, centre line)"
+    If Not viewDet Is Nothing Then
+        SetMode viewDet, DM_HIDDEN_REMOVED, "DETAIL E"
+        PlaceView viewDet, X_NECK, 0#, 0#, DET_X, DET_Y, True, True, "DETAIL E placed (groove, centre line)"
+        If Not DetailHasGroove(viewDet) Then
+            Check False, "DETAIL E does not show the groove - its circle is in the wrong place. Delete DETAIL E and its circle, " & _
+                         "then make it again with the circle round the groove"
+            Set viewDet = Nothing
+            detailPending = True
+        End If
+    End If
     If Not viewIso Is Nothing Then Exit Sub
     dv = Unit(Add3(Add3(vR, vU), vF))
     upI = Unit(Sub3(vU, Scl(dv, Dot(vU, dv))))
@@ -332,12 +383,19 @@ Function ResumeDrawing() As Boolean
         Set v = v.GetNextView
     Loop
     On Error GoTo 0
-    If viewMain Is Nothing Or viewDet Is Nothing Then
+    If viewMain Is Nothing Then
         Set swModel = Nothing: Set swDraw = Nothing
         Exit Function
     End If
+    On Error Resume Next
+    swDraw.EditSheet                                  ' normal sheet mode (not sheet format, not a sketch)
+    swModel.ClearSelection2 True
+    swModel.ForceRebuild3 False                       ' bring every view up to date
+    swModel.GraphicsRedraw2
+    On Error GoTo 0
+    If viewDet Is Nothing Then detailPending = True
     ResumeDrawing = True
-    Check True, "Continuing the open drawing: main view and DETAIL E found"
+    Check True, "Continuing the open drawing: main view found" & IIf(viewDet Is Nothing, ", DETAIL E not made yet", ", DETAIL E found")
 End Function
 
 Function StdIsoName() As String
@@ -345,31 +403,37 @@ Function StdIsoName() As String
 End Function
 
 ' DETAIL E: sketch a circle round the groove in the main view, then make the 2:1 detail from it.
-' The view sketch is measured from the view centre (method 3), so that is tried first; every detail
-' made is checked to really contain the groove, otherwise it is deleted and the next method tried.
+' Each way of placing the circle is tried; a detail is kept only if it really shows the groove.
+' If SolidWorks refuses every way, the circles are removed and DETAIL E is left for you to make by hand.
 Function MakeDetail() As Object
     Dim c As Variant, rad As Double, cand As Variant, seg As Object, dv As Object, before As String, sc As Double
-    Dim combo As Integer, diag As String, used As String, keep As Object, st As Integer, sh As Integer, api As Integer
+    Dim combo As Integer, diag As String, used As String, st As Integer, sh As Integer, api As Integer
 
-    c = SheetPt(viewMain, 3.06, 0#, 0#)                            ' circle centre (groove), sheet inches
+    c = SheetPt(viewMain, 3.06, 0#, 0#)
     sc = 1#: On Error Resume Next: sc = viewMain.ScaleDecimal: On Error GoTo 0
     If sc <= 0 Then sc = 1#
     rad = 0.56 * sc
-    For Each cand In Array(3, 2, 1)
+    For Each cand In Array(0, 3, 2, 1)
         Set seg = DrawViewCircle(viewMain, c, rad, CInt(cand))
         If seg Is Nothing Then
-            diag = diag & "method " & cand & ": circle not drawn. "
+            diag = diag & "m" & cand & ": no circle. "
         Else
             Set dv = Nothing
-            For combo = 0 To 29                                    ' 2 commands x 5 styles x 3 circle display types
-                api = combo \ 15: st = (combo \ 3) Mod 5: sh = combo Mod 3
-                If SelectSeg(seg, c(0) + rad, c(1)) = 0 Then diag = diag & "method " & cand & ": circle not selectable. ": Exit For
+            For combo = -1 To 29
+                If combo >= 0 Then
+                    If SelectSeg(seg, c(0) + rad, c(1)) = 0 Then diag = diag & "m" & cand & ": not selectable. ": Exit For
+                End If
                 before = ViewNames()
                 On Error Resume Next
-                If api = 0 Then
-                    Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, st, 2#, 1#, "E", sh, False, False, False, 1)
+                If combo = -1 Then                        ' exactly as SolidWorks' own example: circle still selected
+                    Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, True, False, False, 5)
                 Else
-                    Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, st, 2#, 1#, "E", sh, False)
+                    api = combo \ 15: st = (combo \ 3) Mod 5: sh = combo Mod 3
+                    If api = 0 Then
+                        Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, st, 2#, 1#, "E", sh, False, False, False, 5)
+                    Else
+                        Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, st, 2#, 1#, "E", sh, False)
+                    End If
                 End If
                 Err.Clear
                 On Error GoTo 0
@@ -377,28 +441,22 @@ Function MakeDetail() As Object
                 If Not dv Is Nothing Then Exit For
             Next
             If Not dv Is Nothing Then
-                If DetailHasGroove(dv) Then used = "method " & cand: Exit For
-                diag = diag & "method " & cand & ": detail did not contain the groove. "
+                If DetailHasGroove(dv) Then used = "m" & cand: Exit For
+                diag = diag & "m" & cand & ": wrong place. "
                 DeleteView dv
                 Set dv = Nothing
             ElseIf combo > 29 Then
-                diag = diag & "method " & cand & ": detail command refused. "
+                diag = diag & "m" & cand & ": refused. "
             End If
-            If CInt(cand) = 3 Then Set keep = seg Else DeleteSeg seg
+            DeleteSeg seg
         End If
     Next
     swModel.ClearSelection2 True
     If dv Is Nothing Then
-        Check False, "DETAIL E: SolidWorks would not make it (" & Trim(diag) & ")"
-        Err.Raise vbObjectError + 20, , "SolidWorks would not let the macro make DETAIL E (" & Trim(diag) & ")." & vbCrLf & vbCrLf & _
-            "Make it by hand, then run the macro again - it will carry on and finish everything else:" & vbCrLf & _
-            "  1. Click OK. A circle is already drawn round the groove in the main view - click it." & vbCrLf & _
-            "  2. Drawing tab > Detail View. Click above the main view to place it." & vbCrLf & _
-            "  3. In the panel: Label = E, Scale = Use custom scale 2:1. Click the green check." & vbCrLf & _
-            "  4. Run main again (keep this drawing open)."
+        Check False, "DETAIL E: the macro could not make it (" & Trim(diag) & ") - make it by hand, see the steps at the end"
+        Exit Function
     End If
-    If Not keep Is Nothing And InStr(used, "3") = 0 Then DeleteSeg keep
-    Check True, "DETAIL E created (" & used & ") and contains the groove"
+    Check True, "DETAIL E created (" & used & ") and shows the groove"
     sc = 0: On Error Resume Next: sc = dv.ScaleDecimal: On Error GoTo 0
     Check (Abs(sc - 2#) < 0.01), "DETAIL E scale 2:1" & IIf(Abs(sc - 2#) < 0.01, "", " (it is " & Format(sc, "0.##") & ") - set the view scale to 2:1 by hand")
     Set MakeDetail = dv
@@ -430,9 +488,12 @@ Function SelectSeg(seg As Object, ByVal px As Double, ByVal py As Double) As Lon
     SelectSeg = swModel.SelectionManager.GetSelectedObjectCount2(-1)
 End Function
 
-' sketch a circle in a drawing view; c = centre (sheet inches), rad = radius (sheet inches)
+' sketch a circle in a drawing view; c = centre (sheet inches), rad = radius (sheet inches).
+' method 0: the view sketch's own sheet->sketch transform; 1: sheet; 2: from the model origin; 3: from the view centre.
+' The new circle is left selected (as in SolidWorks' example).
 Function DrawViewCircle(v As Object, c As Variant, ByVal rad As Double, ByVal cand As Integer) As Object
     Dim x As Double, y As Double, rr As Double, o As Variant, sc As Double, pos As Variant
+    Dim sk As Object, xf As Object, a(2) As Double, va As Variant, p As Object, r As Variant
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
     sc = 1#
@@ -440,6 +501,16 @@ Function DrawViewCircle(v As Object, c As Variant, ByVal rad As Double, ByVal ca
     sc = v.ScaleDecimal
     If sc <= 0 Then sc = 1#
     Select Case cand
+        Case 0
+            Set sk = v.GetSketch
+            Set xf = sk.ModelToSketchTransform
+            If xf Is Nothing Then Exit Function
+            a(0) = c(0) * IN_M: a(1) = c(1) * IN_M: a(2) = 0#: va = a
+            Set p = swMath.CreatePoint((va))
+            Set p = p.MultiplyTransform(xf)
+            r = p.ArrayData
+            If Not IsArray(r) Then Exit Function
+            x = r(0): y = r(1): rr = rad * IN_M / sc
         Case 1
             x = c(0) * IN_M: y = c(1) * IN_M: rr = rad * IN_M
         Case 2
@@ -449,11 +520,9 @@ Function DrawViewCircle(v As Object, c As Variant, ByVal rad As Double, ByVal ca
             pos = v.Position
             x = (c(0) * IN_M - pos(0)) / sc: y = (c(1) * IN_M - pos(1)) / sc: rr = rad * IN_M / sc
     End Select
-    swModel.SketchManager.AddToDB = True
-    Set DrawViewCircle = swModel.SketchManager.CreateCircleByRadius(x, y, 0#, rr)
     swModel.SketchManager.AddToDB = False
+    Set DrawViewCircle = swModel.SketchManager.CreateCircle(x, y, 0#, x + rr, y, 0#)
     swModel.GraphicsRedraw2
-    swModel.ClearSelection2 True
 End Function
 
 Sub DeleteSeg(seg As Object)
@@ -875,10 +944,12 @@ Sub CollectEdges(v As Object)
     If sc <= 0 Then sc = 1#
 
     ents = VisibleEdges(v)
-    If Not IsArray(ents) Then Exit Sub
-    For i = LBound(ents) To UBound(ents)
-        If eN < 1000 Then AddEdge ents(i), xf, sc
-    Next
+    If IsArray(ents) Then
+        For i = LBound(ents) To UBound(ents)
+            If eN < 1000 Then AddEdge ents(i), xf, sc
+        Next
+    End If
+    report = report & "info     " & v.GetName2 & ": " & eN & " edges read" & vbCrLf
 End Sub
 
 Function VisibleEdges(v As Object) As Variant
