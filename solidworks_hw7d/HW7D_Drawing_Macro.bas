@@ -13,6 +13,8 @@
 '   - Detail E: .07, .16, 30 deg, dia .650, dia .492, dia .625, .100, .050
 '   - Title block: C36000 BRASS, today's date, title, SHEET 4 OF 4
 '
+'  v3: DETAIL E circle placed relative to the view centre and checked; continue-mode if made by hand;
+'      dia .650 from its circle edge
 '  v2: DETAIL E tried several ways and reports why; last resort a cropped 2:1 copy with label notes
 '
 '  SAFETY
@@ -74,9 +76,14 @@ Sub main()
 
     curStep = "Step 1 - find the open part":           FindPart
     curStep = "Step 2 - read the part orientation":    FindOrientation
-    curStep = "Step 3 - find your template":           tmpl = FindTemplate()
-    curStep = "Step 4 - new drawing":                  NewDrawing tmpl
-    curStep = "Step 5 - views and DETAIL E":           MakeViews
+    curStep = "Step 3 - continue an open drawing?"
+    If ResumeDrawing() Then
+        curStep = "Step 5 - finish the views":         FinishViews
+    Else
+        curStep = "Step 3 - find your template":       tmpl = FindTemplate()
+        curStep = "Step 4 - new drawing":              NewDrawing tmpl
+        curStep = "Step 5 - views and DETAIL E":       MakeViews
+    End If
     curStep = "Step 6 - centrelines":                  CentreLines viewMain: CentreLines viewDet
     curStep = "Step 7 - main view dimensions":         DimMain
     curStep = "Step 8 - DETAIL E dimensions":          DimDetail
@@ -280,9 +287,15 @@ Sub MakeViews()
 
     Set viewDet = MakeDetail()
     If viewDet Is Nothing Then Err.Raise vbObjectError + 11, , "Could not create DETAIL E."
+    FinishViews
+End Sub
+
+' detail placement and the isometric view (also used when continuing an open drawing)
+Sub FinishViews()
+    Dim dv As Variant, upI As Variant, rtI As Variant
     SetMode viewDet, DM_HIDDEN_REMOVED, "DETAIL E"
     PlaceView viewDet, X_NECK, 0#, 0#, DET_X, DET_Y, True, True, "DETAIL E placed (groove, centre line)"
-
+    If Not viewIso Is Nothing Then Exit Sub
     dv = Unit(Add3(Add3(vR, vU), vF))
     upI = Unit(Sub3(vU, Scl(dv, Dot(vU, dv))))
     rtI = Cross(upI, dv)
@@ -295,64 +308,115 @@ Sub MakeViews()
     End If
 End Sub
 
+' if the active document is a drawing that already has this pin's main view and a 2:1 detail
+' (e.g. DETAIL E made by hand after the first run), carry on with it instead of starting again
+Function ResumeDrawing() As Boolean
+    Dim d As Object, v As Object, sc As Double, a As Variant
+    Set d = swApp.ActiveDoc
+    If d Is Nothing Then Exit Function
+    If d.GetType <> 3 Then Exit Function
+    Set swModel = d: Set swDraw = d
+    Set viewMain = Nothing: Set viewDet = Nothing: Set viewIso = Nothing
+    On Error Resume Next
+    Set v = swDraw.GetFirstView.GetNextView                           ' first "view" is the sheet itself
+    Do While Not v Is Nothing
+        sc = 0: sc = v.ScaleDecimal
+        If Abs(sc - 2#) < 0.01 Then
+            Set viewDet = v
+        ElseIf ViewMatches(v, vR, vU) Then
+            Set viewMain = v
+        Else
+            a = ViewDir(v, vR)
+            If a(0) > 0.5 And a(1) < -0.2 Then Set viewIso = v
+        End If
+        Set v = v.GetNextView
+    Loop
+    On Error GoTo 0
+    If viewMain Is Nothing Or viewDet Is Nothing Then
+        Set swModel = Nothing: Set swDraw = Nothing
+        Exit Function
+    End If
+    ResumeDrawing = True
+    Check True, "Continuing the open drawing: main view and DETAIL E found"
+End Function
+
 Function StdIsoName() As String
     If Near(vR, 1, 0, 0) And Near(vU, 0, 1, 0) And Near(vF, 0, 0, 1) Then StdIsoName = "*Isometric"
 End Function
 
 ' DETAIL E: sketch a circle round the groove in the main view, then make the 2:1 detail from it.
-' Several ways are tried; if SolidWorks refuses them all, a 2:1 copy of the view cropped to the circle
-' is made instead (same picture), with the E label and DETAIL E caption added as notes.
+' The view sketch is measured from the view centre (method 3), so that is tried first; every detail
+' made is checked to really contain the groove, otherwise it is deleted and the next method tried.
 Function MakeDetail() As Object
     Dim c As Variant, rad As Double, cand As Variant, seg As Object, dv As Object, before As String, sc As Double
-    Dim combo As Integer, diag As String, nSel As Long, used As String
+    Dim combo As Integer, diag As String, used As String, keep As Object, st As Integer, sh As Integer, api As Integer
 
     c = SheetPt(viewMain, 3.06, 0#, 0#)                            ' circle centre (groove), sheet inches
     sc = 1#: On Error Resume Next: sc = viewMain.ScaleDecimal: On Error GoTo 0
     If sc <= 0 Then sc = 1#
     rad = 0.56 * sc
-    before = ViewNames()
-    For Each cand In Array(2, 3, 1)
+    For Each cand In Array(3, 2, 1)
         Set seg = DrawViewCircle(viewMain, c, rad, CInt(cand))
         If seg Is Nothing Then
             diag = diag & "method " & cand & ": circle not drawn. "
         Else
-            For combo = 1 To 4
-                nSel = SelectSeg(seg, c(0) + rad, c(1))
-                If nSel = 0 Then diag = diag & "method " & cand & ": circle not selectable. ": Exit For
-                Set dv = Nothing
+            Set dv = Nothing
+            For combo = 0 To 29                                    ' 2 commands x 5 styles x 3 circle display types
+                api = combo \ 15: st = (combo \ 3) Mod 5: sh = combo Mod 3
+                If SelectSeg(seg, c(0) + rad, c(1)) = 0 Then diag = diag & "method " & cand & ": circle not selectable. ": Exit For
+                before = ViewNames()
                 On Error Resume Next
-                Select Case combo
-                    Case 1: Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, False, False, False, 1)
-                    Case 2: Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 0, False, False, False, 1)
-                    Case 3: Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 1, False)
-                    Case 4: Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, 0, 2#, 1#, "E", 0, False)
-                End Select
+                If api = 0 Then
+                    Set dv = swDraw.CreateDetailViewAt4((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, st, 2#, 1#, "E", sh, False, False, False, 1)
+                Else
+                    Set dv = swDraw.CreateDetailViewAt3((DET_X + 1.5) * IN_M, DET_Y * IN_M, 0#, st, 2#, 1#, "E", sh, False)
+                End If
                 Err.Clear
                 On Error GoTo 0
-                If dv Is Nothing Then Set dv = NewViewSince(before)       ' built but not handed back
-                If Not dv Is Nothing Then used = "method " & cand & ", option " & combo: Exit For
+                If dv Is Nothing Then Set dv = NewViewSince(before)
+                If Not dv Is Nothing Then Exit For
             Next
-            If Not dv Is Nothing Then Exit For
-            If combo > 4 Then diag = diag & "method " & cand & ": detail command refused. "
-            DeleteSeg seg
+            If Not dv Is Nothing Then
+                If DetailHasGroove(dv) Then used = "method " & cand: Exit For
+                diag = diag & "method " & cand & ": detail did not contain the groove. "
+                DeleteView dv
+                Set dv = Nothing
+            ElseIf combo > 29 Then
+                diag = diag & "method " & cand & ": detail command refused. "
+            End If
+            If CInt(cand) = 3 Then Set keep = seg Else DeleteSeg seg
         End If
     Next
     swModel.ClearSelection2 True
-
     If dv Is Nothing Then
-        Set dv = CroppedDetail(c, rad)
-        If dv Is Nothing Then
-            Check False, "DETAIL E: SolidWorks would not make the detail view (" & Trim(diag) & ")"
-            Exit Function
-        End If
-        Check False, "DETAIL E made as a 2:1 copy cropped to a circle (the detail command was refused: " & Trim(diag) & _
-                     "). It prints the same; the E label and caption are notes"
-    Else
-        Check True, "DETAIL E created (" & used & ")"
+        Check False, "DETAIL E: SolidWorks would not make it (" & Trim(diag) & ")"
+        Err.Raise vbObjectError + 20, , "SolidWorks would not let the macro make DETAIL E (" & Trim(diag) & ")." & vbCrLf & vbCrLf & _
+            "Make it by hand, then run the macro again - it will carry on and finish everything else:" & vbCrLf & _
+            "  1. Click OK. A circle is already drawn round the groove in the main view - click it." & vbCrLf & _
+            "  2. Drawing tab > Detail View. Click above the main view to place it." & vbCrLf & _
+            "  3. In the panel: Label = E, Scale = Use custom scale 2:1. Click the green check." & vbCrLf & _
+            "  4. Run main again (keep this drawing open)."
     End If
+    If Not keep Is Nothing And InStr(used, "3") = 0 Then DeleteSeg keep
+    Check True, "DETAIL E created (" & used & ") and contains the groove"
     sc = 0: On Error Resume Next: sc = dv.ScaleDecimal: On Error GoTo 0
     Check (Abs(sc - 2#) < 0.01), "DETAIL E scale 2:1" & IIf(Abs(sc - 2#) < 0.01, "", " (it is " & Format(sc, "0.##") & ") - set the view scale to 2:1 by hand")
     Set MakeDetail = dv
+End Function
+
+' a real DETAIL E shows the ring face (a vertical edge .75 long at the ring) inside it
+Function DetailHasGroove(dv As Object) As Boolean
+    Dim i As Long, x As Double, sc As Double
+    CollectEdges dv
+    sc = 2#: On Error Resume Next: sc = dv.ScaleDecimal: On Error GoTo 0
+    x = SX(dv, X_RINGR)
+    For i = 0 To eN - 1
+        If eKind(i) = "L" Then
+            If Abs(eX2(i) - eX1(i)) < 0.003 And Abs((eX1(i) + eX2(i)) / 2 - x) < 0.02 Then
+                If Abs(Abs(eY2(i) - eY1(i)) / sc - 0.75) < 0.01 Then DetailHasGroove = True: Exit Function
+            End If
+        End If
+    Next
 End Function
 
 ' select a sketch segment: the object itself, else by clicking on it; returns how many are selected
@@ -364,50 +428,6 @@ Function SelectSeg(seg As Object, ByVal px As Double, ByVal py As Double) As Lon
         swModel.Extension.SelectByID2 "", "SKETCHSEGMENT", px * IN_M, py * IN_M, 0#, False, 0, Nothing, 0
     End If
     SelectSeg = swModel.SelectionManager.GetSelectedObjectCount2(-1)
-End Function
-
-' fallback for DETAIL E: the circle stays in the main view, a 2:1 copy of the view is cropped to it
-Function CroppedDetail(c As Variant, ByVal rad As Double) As Object
-    Dim dv As Object, cand As Variant, seg As Object, cc As Variant, ok As Boolean, ring As Object, nt As Object
-    Dim sc As Double
-
-    ' circle in the main view (kept), with its E label
-    For Each cand In Array(2, 3, 1)
-        Set ring = DrawViewCircle(viewMain, c, rad, CInt(cand))
-        If Not ring Is Nothing Then Exit For
-    Next
-    ' 2:1 copy of the main view
-    Set dv = OrientedView("HW7D_Det", vR, vU, vF, DET_X + 1.5, DET_Y, StdFrontName(), False)
-    If dv Is Nothing Then Exit Function
-    On Error Resume Next
-    dv.ScaleRatio = Array(2#, 1#)
-    If Abs(dv.ScaleDecimal - 2#) > 0.01 Then dv.ScaleDecimal = 2#
-    swModel.ForceRebuild3 False
-    On Error GoTo 0
-    PlaceView dv, X_NECK, 0#, 0#, DET_X, DET_Y, True, True, "DETAIL E copy placed"
-    ' crop it to a circle round the groove
-    cc = SheetPt(dv, 3.06, 0#, 0#)
-    sc = 2#: On Error Resume Next: sc = dv.ScaleDecimal: On Error GoTo 0
-    For Each cand In Array(2, 3, 1)
-        Set seg = DrawViewCircle(dv, cc, 0.56 * sc, CInt(cand))
-        If Not seg Is Nothing Then
-            If SelectSeg(seg, cc(0) + 0.56 * sc, cc(1)) > 0 Then
-                On Error Resume Next
-                ok = swDraw.CropView
-                On Error GoTo 0
-                If ok Then Exit For
-            End If
-            DeleteSeg seg
-        End If
-    Next
-    Check ok, "DETAIL E copy cropped to the circle" & IIf(ok, "", " - crop it by hand (sketch a circle, Crop View)")
-    ' labels: E above the circle in the main view, caption under the detail
-    swDraw.ActivateSheet swDraw.GetCurrentSheet.GetName
-    AddSheetNote "E", c(0) - 0.05, c(1) + rad + 0.2, "DETAIL E: letter E on the main view circle"
-    AddSheetNote "DETAIL E", cc(0) - 0.6, cc(1) - 0.56 * sc - 0.45, "DETAIL E caption"
-    AddSheetNote "SCALE 2 : 1", cc(0) - 0.65, cc(1) - 0.56 * sc - 0.62, "DETAIL E scale caption"
-    swModel.ClearSelection2 True
-    Set CroppedDetail = dv
 End Function
 
 ' sketch a circle in a drawing view; c = centre (sheet inches), rad = radius (sheet inches)
@@ -631,8 +651,11 @@ Sub DimDetail()
     xRR = SX(viewDet, X_RINGR): xN = SX(viewDet, X_NECK): xU2 = SX(viewDet, X_UC2): yA = SY(viewDet, 0)
     MakeDimP viewDet, "H", Array(X_RINGR, 0.36, 0#), Array(X_UC1, 0.28, 0#), xRR - 0.42, yA + 1.47, 0.07, "Detail E .07", "", 2
     MakeDimP viewDet, "H", Array(X_RINGR, 0.36, 0#), Array(X_UC2, 0.2, 0#), xRR - 0.44, yA + 1.14, 0.16, "Detail E .16", "", 2
-    MakeDimP viewDet, "A", Array(X_RINGR, 0.36, 0#), Array((X_UC2 + X_PIN) / 2, 0.279, 0#), xRR + 0.55, yA + 1.72, 30#, "Detail E 30" & ChrW(176)
-    DiaDim viewDet, (X_NECK + X_RINGL) / 2, 0.325, -1, 0, xN - 1.64, yA, 0.65, "Detail E " & ChrW(216) & ".650", 3
+    Dim why As String
+    why = TryDim(viewDet, "A", Array(X_RINGR, 0.36, 0#), Array((X_UC2 + X_PIN) / 2, 0.279, 0#), xRR + 0.55, yA + 1.72, 30#, "", -1, "", False, True)
+    Check (Len(why) = 0), "Detail E 30" & ChrW(176) & IIf(Len(why) = 0, "", "  - " & why & _
+          ". Add it by hand: Smart Dimension, click the ring face line, then the 30" & ChrW(176) & " chamfer line")
+    DiaByEdge viewDet, Array(X_NECK, X_RINGL), 0.65, xN - 1.64, yA, "Detail E " & ChrW(216) & ".650", 3
     DiaDim viewDet, (X_UC1 + X_UC2) / 2, 0.246, X_UC2, 0.1, xU2 + 1.89, yA, 0.492, "Detail E " & ChrW(216) & ".492", 3
     DiaDim viewDet, X_PIN + 0.15, 0.3125, X_PIN, 0.2, xU2 + 2.6, yA, 0.625, "Detail E " & ChrW(216) & ".625", 3
     MakeDimP viewDet, "H", Array(X_NECK, 0.36, 0#), Array(X_RINGR, 0.36, 0#), xN - 0.46, yA - 0.99, 0.1, "Detail E .100", "", 3
@@ -648,6 +671,30 @@ Sub DiaDim(v As Object, ByVal xs As Double, ByVal rr As Double, ByVal xe As Doub
     If Len(why) > 0 And xe >= 0 Then
         why = TryDim(v, "VL", Array(xe, re, 0#), Empty, tx, ty, expect, "<MOD-DIAM>", prec, "", False, True)
     End If
+    Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - " & why)
+End Sub
+
+' diameter from a circle edge seen side-on: the vertical line of exactly that length at one of the x positions
+Sub DiaByEdge(v As Object, xs As Variant, ByVal dia As Double, ByVal tx As Double, ByVal ty As Double, ByVal label As String, ByVal prec As Long)
+    Dim i As Long, k As Integer, sc As Double, x As Double, best As Long, why As String
+    sc = 1#: On Error Resume Next: sc = v.ScaleDecimal: On Error GoTo 0
+    If sc <= 0 Then sc = 1#
+    best = -1
+    For k = LBound(xs) To UBound(xs)
+        x = SX(v, CDbl(xs(k)))
+        For i = 0 To eN - 1
+            If eKind(i) = "L" And best < 0 Then
+                If Abs(eX2(i) - eX1(i)) < 0.003 And Abs((eX1(i) + eX2(i)) / 2 - x) < 0.01 Then
+                    If Abs(Abs(eY2(i) - eY1(i)) / sc - dia) < 0.005 Then best = i
+                End If
+            End If
+        Next
+    Next
+    If best < 0 Then Check False, label & "  - MISSING (no " & Format(dia, ".000") & " circle edge found)": Exit Sub
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    SelEdge v, best, False
+    why = TryDimSel("VL", 1, tx, ty, dia, "<MOD-DIAM>", prec, "", False, True)
     Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - " & why)
 End Sub
 
@@ -686,16 +733,24 @@ End Sub
 Function TryDim(v As Object, ByVal kind As String, pa As Variant, pb As Variant, ByVal tx As Double, ByVal ty As Double, _
                 ByVal expect As Double, ByVal prefix As String, ByVal prec As Long, ByVal suffix As String, _
                 ByVal paren As Boolean, ByVal deleteIfWrong As Boolean) As String
-    Dim dd As Object, got As Double, nSel As Long, need As Long, txt As String, ok As Boolean
+    Dim need As Long
     If kind = "H" Or kind = "V" Or kind = "S" Or kind = "A" Then need = 2 Else need = 1
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
     SelPt v, pa, False
     If need = 2 Then SelPt v, pb, True
+    TryDim = TryDimSel(kind, need, tx, ty, expect, prefix, prec, suffix, paren, deleteIfWrong)
+End Function
+
+' makes a dimension from the current selection; returns "" when it measured right, otherwise the reason
+Function TryDimSel(ByVal kind As String, ByVal need As Long, ByVal tx As Double, ByVal ty As Double, _
+                   ByVal expect As Double, ByVal prefix As String, ByVal prec As Long, ByVal suffix As String, _
+                   ByVal paren As Boolean, ByVal deleteIfWrong As Boolean) As String
+    Dim dd As Object, got As Double, nSel As Long, txt As String, ok As Boolean
     nSel = swModel.SelectionManager.GetSelectedObjectCount2(-1)
     If nSel <> need Then
         swModel.ClearSelection2 True
-        TryDim = "MISSING (found " & nSel & " of " & need & " edge(s))"
+        TryDimSel = "MISSING (found " & nSel & " of " & need & " edge(s))"
         Exit Function
     End If
     Set dd = Nothing
@@ -709,7 +764,7 @@ Function TryDim(v As Object, ByVal kind As String, pa As Variant, pb As Variant,
     End Select
     On Error GoTo 0
     swModel.ClearSelection2 True
-    If dd Is Nothing Then TryDim = "MISSING (SolidWorks did not create it)": Exit Function
+    If dd Is Nothing Then TryDimSel = "MISSING (SolidWorks did not create it)": Exit Function
 
     On Error Resume Next
     got = -1
@@ -736,7 +791,7 @@ Function TryDim(v As Object, ByVal kind As String, pa As Variant, pb As Variant,
         ok = (Abs(got - expect) < 0.003)
     End If
     If Not ok Then
-        TryDim = "WRONG (measured " & Format(got, "0.000") & ")"
+        TryDimSel = "WRONG (measured " & Format(got, "0.000") & ")"
         If deleteIfWrong Then
             On Error Resume Next
             swModel.ClearSelection2 True
@@ -746,7 +801,7 @@ Function TryDim(v As Object, ByVal kind As String, pa As Variant, pb As Variant,
             On Error GoTo 0
         End If
     ElseIf Len(prefix) > 0 And InStr(txt, prefix) = 0 Then
-        TryDim = "value OK, but the " & IIf(prefix = "<MOD-DIAM>", ChrW(216) & " symbol", "prefix") & " did not stick; add it by hand"
+        TryDimSel = "value OK, but the " & IIf(prefix = "<MOD-DIAM>", ChrW(216) & " symbol", "prefix") & " did not stick; add it by hand"
     End If
 End Function
 
