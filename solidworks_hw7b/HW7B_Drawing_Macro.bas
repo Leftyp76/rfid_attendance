@@ -178,7 +178,7 @@ Sub FindOrientation()
             End If
         Next
     Next
-    If bossN = 0 Then Err.Raise vbObjectError + 4, , "This part has no dia .75 boss, so it is not In-Lab Assignment Part #2 (" & Mid(partPath, InStrRev(partPath, "\\") + 1) & "). Click into the Part #2 window and run again."
+    If bossN = 0 Then Err.Raise vbObjectError + 4, , "This part has no dia .75 boss, so it is not In-Lab Assignment Part #2 (" & Mid(partPath, InStrRev(partPath, "\") + 1) & "). Click into the Part #2 window and run again."
     If endN = 0 Then Err.Raise vbObjectError + 4, , "Could not find the R1.00 end in the part."
     If xN = 0 Then Err.Raise vbObjectError + 4, , "Could not find the dia .29 cross hole in the part."
     For k = 0 To 2
