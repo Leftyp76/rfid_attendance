@@ -17,6 +17,9 @@
 '   - VIEW D-D: 1.00, .625 THRU, .75, R.75, dia .875
 '   - Title block: 1018 CRS, today's date, title, SHEET 3 OF 4, SCALE 1:2
 '
+'  v2: VIEW D-D tried several ways (direct edge, sheet pick, recover a view built but not returned,
+'      last resort an ordinary view square to the face)
+'
 '  SAFETY
 '   - Part orientation read from the dia .50 hole and the R.50 groove.
 '   - Edges picked from their exact positions on the part; VIEW D-D edges found by measurement.
@@ -342,29 +345,79 @@ Function StdIsoName() As String
     If Near(vR, 1, 0, 0) And Near(vU, 0, 1, 0) And Near(vF, 0, 0, 1) Then StdIsoName = "*Isometric"
 End Function
 
-' auxiliary view square to the 60 deg end face: select its edge in the front view, then create
+' auxiliary view square to the 60 deg end face: select its edge in the front view, then create.
+' Several ways are tried, because SolidWorks sometimes builds the view without handing it back.
 Function MakeAux() As Object
-    Dim av As Object, n2 As Variant
+    Dim av As Object, n2 As Variant, before As String, m As Integer, sp As Variant, how As String
+    Dim ax As Variant, ay As Variant, w2 As Variant
+
     CollectEdges viewFront
+    before = ViewNames()
+    sp = SheetPt(viewFront, pickR, 0#, pickF)
+    For m = 1 To 2
+        swModel.ClearSelection2 True
+        swDraw.ActivateView viewFront.GetName2
+        If m = 1 Then
+            SelPt viewFront, Array(pickR, 0#, pickF), False                    ' the edge object itself
+        Else
+            On Error Resume Next                                                 ' a click on the sheet
+            swModel.Extension.SelectByID2 "", "EDGE", sp(0) * IN_M, sp(1) * IN_M, 0#, False, 0, Nothing, 0
+            On Error GoTo 0
+        End If
+        If swModel.SelectionManager.GetSelectedObjectCount2(-1) > 0 Then
+            On Error Resume Next
+            Set av = Nothing
+            Set av = swDraw.CreateAuxiliaryViewAt2(AUX_X * IN_M, AUX_Y * IN_M, 0#, False)
+            If av Is Nothing Then Err.Clear: Set av = swDraw.CreateAuxiliaryViewAt(AUX_X * IN_M, AUX_Y * IN_M, 0#, False)
+            On Error GoTo 0
+            If av Is Nothing Then Set av = NewViewSince(before)                 ' built but not handed back
+            If Not av Is Nothing Then how = IIf(m = 1, "edge selected directly", "edge picked on the sheet"): Exit For
+        End If
+    Next
     swModel.ClearSelection2 True
-    swDraw.ActivateView viewFront.GetName2
-    If Not SelPt(viewFront, Array(pickR, 0#, pickF), False) Then
-        Check False, "VIEW D-D: could not find the 60 deg end face edge in the front view"
-        Exit Function
-    End If
-    On Error Resume Next
-    Set av = swDraw.CreateAuxiliaryViewAt2(AUX_X * IN_M, AUX_Y * IN_M, 0#, False)
-    If av Is Nothing Then Err.Clear: Set av = swDraw.CreateAuxiliaryViewAt(AUX_X * IN_M, AUX_Y * IN_M, 0#, False)
-    On Error GoTo 0
-    swModel.ClearSelection2 True
+
     If av Is Nothing Then
-        Check False, "VIEW D-D: SolidWorks would not create the auxiliary view"
-        Exit Function
+        ' last resort: an ordinary view turned to look square at the face (same picture, no D-D arrows)
+        w2 = Cross(vN, vA)
+        ax = Add3(Scl(vA, -Sqr(3#) / 2), Scl(w2, -0.5))                        ' face direction shown at 150 deg,
+        ay = Add3(Scl(vA, 0.5), Scl(w2, -Sqr(3#) / 2))                          ' as in an aligned auxiliary view
+        Set av = OrientedView("HW7C_DD", ax, ay, vN, AUX_X, AUX_Y, "", False)
+        If av Is Nothing Then
+            Check False, "VIEW D-D: SolidWorks would not create the auxiliary view"
+            Exit Function
+        End If
+        Check False, "VIEW D-D made as a plain view square to the face (SolidWorks refused the auxiliary command). " & _
+                     "Dimensions still go on it; the D-D arrows and label must be added by hand"
+    Else
+        Check True, "VIEW D-D created (" & how & ")"
     End If
     n2 = ViewDir(av, vN)                                     ' the face normal must point straight at you
     Check (Sqr(n2(0) ^ 2 + n2(1) ^ 2) < 0.1), "VIEW D-D looks square onto the 60 deg end face"
-    Check True, "VIEW D-D created - if its arrows read A instead of D, click the arrow and change Label to D"
+    Check True, "If the VIEW D-D arrows read A instead of D, click an arrow and change Label to D"
     Set MakeAux = av
+End Function
+
+' names of all views on the sheet, separated by |
+Function ViewNames() As String
+    Dim v As Object, t As String
+    On Error Resume Next
+    Set v = swDraw.GetFirstView
+    Do While Not v Is Nothing
+        t = t & "|" & v.GetName2 & "|"
+        Set v = v.GetNextView
+    Loop
+    ViewNames = t
+End Function
+
+' a view that exists now but was not in the list taken earlier
+Function NewViewSince(ByVal before As String) As Object
+    Dim v As Object
+    On Error Resume Next
+    Set v = swDraw.GetFirstView
+    Do While Not v Is Nothing
+        If InStr(before, "|" & v.GetName2 & "|") = 0 Then Set NewViewSince = v: Exit Function
+        Set v = v.GetNextView
+    Loop
 End Function
 
 ' move view v so that part point (r,u,f) lands at sheet (tx,ty); doX / doY choose which axes move
