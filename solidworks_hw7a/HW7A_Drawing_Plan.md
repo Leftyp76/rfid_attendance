@@ -82,7 +82,7 @@ as OK or wrong, like the volume checks in the HW#4C macro.
 |---|---|
 | MATERIAL | 316 STAINLESS STEEL |
 | TITLE | IME 1140 ENGINEERING DRAWINGS I / IN-LAB ASSIGNMENT #7A |
-| DATE | See question 2 |
+| DATE | Today's date |
 | DRAWN BY | Already in the template as HAYDEN PERHACH |
 
 ## Saving
@@ -104,12 +104,9 @@ as OK or wrong, like the volume checks in the HW#4C macro.
 6. Title block notes.
 7. Save the drawing and the PDF, then show the check report.
 
-## Open questions
+## Decisions
 
-1. **Sheet number and ASME year.** The reference says SHEET 1 OF 4 and ASME Y14.5 2009.
-   Your template says SHEET 1 OF 1 and 2018. Default: keep your template.
-2. **Date.** The reference shows 07-18-2026. Default: today's date.
-3. **Instructor note.** The line "NOTES: USE THE IN-LAB ASSIGNMENT PART#1 ON CANVAS..."
-   at the top looks like the assignment's own instruction. Default: leave it off.
-4. **Logo.** I can't tell whether your template has the Cal Poly logo. If it doesn't,
-   the macro won't add one.
+1. Sheet note reads SHEET 1 OF 4, like the reference. The template's ASME line stays as it is.
+2. The date is the day the macro runs, written as MM-DD-YYYY.
+3. The instructor's NOTES line is left off.
+4. The Cal Poly logo comes from your template.
