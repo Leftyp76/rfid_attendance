@@ -19,6 +19,7 @@
 '   - Right: .25, 3.00, .25, R.25, 2 X R.125, .025 X 45 deg TYP
 '   - Title block: 316 STAINLESS STEEL, today's date, title, SHEET 1 OF 4.
 '
+'  v5: positions measured from the reference; "2 X" keeps the O / R symbol
 '  v4: always leaves Edit Sheet Format mode and redraws before saving (fixes the blank PDF)
 '  v3: circles seen side-on count as straight lines (fixes the Top 1.50)
 '  v2: view outlines measured from exact edge end points (fixes the MISSING straight-edge dimensions)
@@ -47,12 +48,12 @@ Dim nOK As Long, nBad As Long
 Const IN_M = 0.0254              ' metres per inch (the API always works in metres)
 
 ' ---- sheet layout, view centres in inches from the sheet's lower-left corner ----
-Const FRONT_X = 2.46
-Const FRONT_Y = 3.23
-Const TOP_Y = 6.8
-Const RIGHT_X = 6.66
-Const ISO_X = 9.46
-Const ISO_Y = 6.51
+Const FRONT_X = 2.71
+Const FRONT_Y = 3.17
+Const TOP_Y = 6.6
+Const RIGHT_X = 6.72
+Const ISO_X = 9.37
+Const ISO_Y = 6.49
 
 ' ---- display modes (swDisplayMode_e) ----
 Const DM_HIDDEN_VISIBLE = 1      ' swHIDDEN_GREYED  = hidden lines visible (dashed)
@@ -494,13 +495,13 @@ Sub DimTop()
     eRight = PickLine(True, xMax, 0.01)
     eFront = PickLine(False, yMin, 0.01)
     eBack = PickLine(False, yMax, 0.01)
-    r1 = yMin - 0.3: r2 = yMin - 0.7
-    MakeDim viewTop, "D", hL, -1, xMin - 0.55, yMin - 0.25, 0.5, "Top    2 X " & ChrW(216) & ".50", "2 X "
+    r1 = yMin - 0.25: r2 = yMin - 0.64
+    MakeDim viewTop, "D", hL, -1, xMin - 0.67, yMin - 0.25, 0.5, "Top    2 X " & ChrW(216) & ".50", "2 X "
     MakeDim viewTop, "H", hL, hR, (CX(hL) + CX(hR)) / 2, r1, 1#, "Top    1.00  (hole to hole)"
-    MakeDim viewTop, "H", hR, eRight, xMax + 0.35, r1, 0.5, "Top    .50  (hole to side)"
+    MakeDim viewTop, "H", hR, eRight, xMax + 0.3, r1, 0.5, "Top    .50  (hole to side)"
     MakeDim viewTop, "H", eLeft, eRight, (xMin + xMax) / 2, r2, 2#, "Top    2.00"
-    MakeDim viewTop, "V", hR, eFront, xMax + 0.3, (yMin + CY(hR)) / 2, 0.5, "Top    .50  (hole to front edge)"
-    MakeDim viewTop, "V", eFront, eBack, xMax + 0.65, (yMin + yMax) / 2, 1.5, "Top    1.50"
+    MakeDim viewTop, "V", hR, eFront, xMax + 0.27, CY(hR) + 0.3, 0.5, "Top    .50  (hole to front edge)"
+    MakeDim viewTop, "V", eFront, eBack, xMax + 1.23, (yMin + yMax) / 2, 1.5, "Top    1.50"
 End Sub
 
 Sub DimFront()
@@ -510,10 +511,10 @@ Sub DimFront()
     arc = PickCircle(1#, 0.01, "maxy", 0)
     eBot = PickLine(False, yMin, 0.01)
     eRt = PickLine(True, xMax, 0.01)
-    MakeDim viewFront, "R", arc, -1, xMax + 0.6, yMax + 0.15, 1#, "Front  R1.00"
-    MakeDim viewFront, "D", hole, -1, xMax + 0.6, yMax - 0.25, 1#, "Front  " & ChrW(216) & "1.00"
-    MakeDim viewFront, "V", hole, eBot, xMax + 0.4, (yMin + CY(hole)) / 2, 1.5, "Front  1.50  (hole height)"
-    MakeDim viewFront, "H", hole, eRt, (CX(hole) + xMax) / 2, yMin - 0.4, 1#, "Front  1.00  (hole to side)"
+    MakeDim viewFront, "R", arc, -1, xMax + 0.67, yMax + 0.16, 1#, "Front  R1.00"
+    MakeDim viewFront, "D", hole, -1, xMax + 0.83, yMax - 0.24, 1#, "Front  " & ChrW(216) & "1.00"
+    MakeDim viewFront, "V", hole, eBot, xMax + 0.35, (yMin + CY(hole)) / 2, 1.5, "Front  1.50  (hole height)"
+    MakeDim viewFront, "H", hole, eRt, (CX(hole) + xMax) / 2, yMin - 0.41, 1#, "Front  1.00  (hole to side)"
 End Sub
 
 Sub DimRight()
@@ -527,12 +528,12 @@ Sub DimRight()
     a25 = PickCircle(0.25, 0.01, "any", 0)             ' inside bend
     a125 = PickCircle(0.125, 0.01, "maxdiag", 0)       ' outside bend (lower right)
     ch = PickChamfer()
-    MakeDim viewRight, "H", eIn, eOut, xMax + 0.35, yMax + 0.25, 0.25, "Right  .25  (upright)"
+    MakeDim viewRight, "H", eIn, eOut, xMax + 0.44, yMax + 0.18, 0.25, "Right  .25  (upright)"
     MakeDim viewRight, "V", eTop, eBot, xMax + 0.7, (yMin + yMax) / 2, 3#, "Right  3.00"
-    MakeDim viewRight, "V", eFl, eBot, xMin - 0.4, yMin - 0.3, 0.25, "Right  .25  (flange)"
-    MakeDim viewRight, "R", a25, -1, xMin + 0.35, yMin + 0.8, 0.25, "Right  R.25"
-    MakeDim viewRight, "R", a125, -1, xMax + 0.9, yMin - 0.3, 0.125, "Right  2 X R.125", "2 X ", 3
-    LeaderNote viewRight, ch, ".025 X 45<MOD-DEG> TYP", xMin - 0.95, yMin + 0.8, "Right  .025 X 45" & ChrW(176) & " TYP"
+    MakeDim viewRight, "V", eFl, eBot, xMin - 0.38, yMin - 0.26, 0.25, "Right  .25  (flange)"
+    MakeDim viewRight, "R", a25, -1, xMin + 0.28, yMin + 0.78, 0.25, "Right  R.25"
+    MakeDim viewRight, "R", a125, -1, xMax + 0.7, yMin - 0.25, 0.125, "Right  2 X R.125", "2 X ", 3
+    LeaderNote viewRight, ch, ".025 X 45<MOD-DEG> TYP", xMin - 1.5, yMin + 0.84, "Right  .025 X 45" & ChrW(176) & " TYP"
 End Sub
 
 ' kind: H horizontal, V vertical, D diameter, R radius.  ia/ib = edge indices (ib = -1 for D and R)
@@ -581,7 +582,10 @@ Sub MakeDim(v As Object, ByVal kind As String, ByVal ia As Long, ByVal ib As Lon
         If Err.Number <> 0 Then Err.Clear: dd.SetPrecision2 prec, -1, -1, -1
     End If
     If Len(prefix) > 0 Then
-        dd.SetText 1, prefix                                    ' 1 = swDimensionTextPrefix
+        txt = ""
+        txt = dd.GetText(1)                                     ' 1 = swDimensionTextPrefix (holds the O / R symbol)
+        If Left(txt, Len(prefix)) <> prefix Then prefix = prefix & txt Else prefix = txt
+        dd.SetText 1, prefix
         txt = dd.GetText(1)
     End If
     On Error GoTo 0
