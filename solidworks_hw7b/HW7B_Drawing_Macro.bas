@@ -18,6 +18,7 @@
 '   - Right:   2.000, 1.250, (.375), .60, .025 X 45 deg TYP
 '   - Title block: 6061-T6 ALUMINUM, today's date, title, SHEET 2 OF 4.
 '
+'  v4: slot picks moved off the cutting line; views placed by real edges; section label moved down
 '  v3: picks the open part named Part #2 even when other parts/drawings are open
 '  v2: cutting line selected directly (screen picking failed on a just-drawn line)
 '
@@ -310,6 +311,33 @@ Sub MakeViews()
     Set viewSec = MakeSection(viewPar, PAR_X, SEC_Y)
     If viewSec Is Nothing Then Err.Raise vbObjectError + 11, , "Could not create SECTION B-B."
     SetMode viewSec, DM_HIDDEN_REMOVED, "Section B-B"
+
+    ' SolidWorks places views by their outlines, so measure real part edges and move each view
+    ' to where the reference sheet has it (sheet inches)
+    PlaceView viewPar, 0#, 1#, 0#, 1.54, 7.02, True, True, "Plan view: left end at 1.54 in, back edge at 7.02 in"
+    PlaceView viewRight, 0#, 0#, 0#, 9.495, 0#, True, False, "Right view: bottom face at 9.50 in"
+    PlaceView viewSec, 0#, 0#, 0#, 0#, 1.98, False, True, "Section B-B: bottom at 1.98 in (clear of the plan view)"
+End Sub
+
+' move view v so that part point (r,u,f) lands at sheet (tx,ty); doX / doY choose which axes move
+Sub PlaceView(v As Object, ByVal r As Double, ByVal u As Double, ByVal f As Double, ByVal tx As Double, ByVal ty As Double, _
+              ByVal doX As Boolean, ByVal doY As Boolean, ByVal label As String)
+    Dim cur As Variant, pos As Variant, k As Integer, ok As Boolean
+    For k = 1 To 3
+        cur = SheetPt(v, r, u, f)
+        ok = (Not doX Or Abs(cur(0) - tx) < 0.02) And (Not doY Or Abs(cur(1) - ty) < 0.02)
+        If ok Then Exit For
+        On Error Resume Next
+        pos = v.Position
+        If doX Then pos(0) = pos(0) + (tx - cur(0)) * IN_M
+        If doY Then pos(1) = pos(1) + (ty - cur(1)) * IN_M
+        v.Position = pos
+        swModel.ForceRebuild3 False
+        On Error GoTo 0
+    Next
+    cur = SheetPt(v, r, u, f)
+    ok = (Not doX Or Abs(cur(0) - tx) < 0.02) And (Not doY Or Abs(cur(1) - ty) < 0.02)
+    Check ok, label & IIf(ok, "", " - could not move it there; drag it by hand")
 End Sub
 
 ' cutting line along the centre line of the plan view, then the section view under it
@@ -532,7 +560,7 @@ End Sub
 Sub CentreMarksAndLines()
     CollectEdges viewPar
     CentreMarkAt viewPar, Array(3.25 + 0.1326, -0.1326, 1.025), "Plan view: centre mark on the " & ChrW(216) & ".375 hole"
-    CentreMarkAt viewPar, Array(0.625, 0#, 0.6), "Plan view: centre mark on the slot"
+    CentreMarkAt viewPar, Array(0.5, 0.2165, 0.6), "Plan view: centre mark on the slot"
     CollectEdges viewSec
     CentreMarkAt viewSec, Array(1.625 + 0.145, 0#, 0.3), "Section: centre mark on the " & ChrW(216) & ".290 hole"
     CentreLines viewPar
@@ -569,9 +597,9 @@ Sub DimPlan()
     MakeDimP viewPar, "R", Array(0.9482, 0.5518, 1.075), Empty, xMin - 0.27, yMax + 0.32, 0.25, "Plan     R.25 TYP", "", 2, " TYP"
     MakeDimP viewPar, "R", Array(2.2134, 0.4634, 1.075), Empty, xMin + 3.33, yMax + 0.32, 0.125, "Plan     4 X R.125", "4 X ", 3
     MakeDimP viewPar, "R", Array(3.9571, 0.7071, 0.6), Empty, xMax + 0.54, yMax + 0.32, 1#, "Plan     R1.00", "", 2
-    MakeDimP viewPar, "V", Array(1.5, 1#, 0.6), Array(0.625, 0#, 0.6), xMin - 0.65, yMax - 0.5, 1#, "Plan     1.00", "", 2
+    MakeDimP viewPar, "V", Array(1.5, 1#, 0.6), Array(0.5, 0.2165, 0.6), xMin - 0.65, yMax - 0.5, 1#, "Plan     1.00", "", 2
     LeaderNoteP viewPar, Array(0.0625, -0.9375, 0.6), ".125 X 45<MOD-DEG>", xMin - 1.16, yMin - 0.1, "Plan     .125 X 45" & ChrW(176) & " chamfer note"
-    MakeDimP viewPar, "H", Array(0#, 0.6, 0.6), Array(0.625, 0#, 0.6), xMin - 0.39, yMin - 0.4, 0.375, "Plan     .375", "", 3
+    MakeDimP viewPar, "H", Array(0#, 0.6, 0.6), Array(0.5, 0.2165, 0.6), xMin - 0.39, yMin - 0.4, 0.375, "Plan     .375", "", 3
     MakeDimP viewPar, "H", Array(0#, 0.6, 0.6), Array(0.875, 0.1, 1.075), xMin - 0.39, yMin - 0.68, 0.875, "Plan     .875", "", 3
     MakeDimP viewPar, "H", Array(0#, 0.6, 0.6), Array(3.25 + 0.1326, -0.1326, 1.025), (xMin + hx) / 2, yMin - 0.94, 3.25, "Plan     3.25", "", 2
     MakeDimP viewPar, "D", Array(3.25 + 0.1326, -0.1326, 1.025), Empty, xMax + 0.21, yMin - 0.26, 0.375, "Plan     " & ChrW(216) & ".375", "", 3
@@ -591,6 +619,27 @@ Sub DimSection()
     MakeDimP viewSec, "D", Array(1.77, 0#, 0.3), Empty, xMin + 2.74, yMin - 0.24, 0.29, "Section  " & ChrW(216) & ".290", "", 3
     MakeDimP viewSec, "V", Array(2.97, 0#, 1.025), Array(3.15, 0#, 0.275), xMax + 0.42, SY(viewSec, 0.65), 0.75, "Section  .75  (hole depth)", "", 2
     MakeDimP viewSec, "V", Array(2.6, 0#, 0#), Array(2.97, 0#, 1.025), xMax + 0.89, SY(viewSec, 0.5125), 1.025, "Section  1.025", "", 3
+    MoveSectionLabel
+End Sub
+
+' the "SECTION B-B" label sits just under the view by default, on top of the 1.625 and dia .290
+Sub MoveSectionLabel()
+    Dim nt As Object, p As Variant, moved As Boolean
+    On Error Resume Next
+    Set nt = viewSec.GetFirstNote
+    Do While Not nt Is Nothing
+        If InStr(UCase(nt.GetText), "SECTION") > 0 Then
+            p = nt.GetAnnotation.GetPosition
+            If IsArray(p) Then
+                nt.GetAnnotation.SetPosition2 p(0), p(1) - 0.32 * IN_M, 0#
+                moved = True
+            End If
+            Exit Do
+        End If
+        Set nt = nt.GetNext
+    Loop
+    On Error GoTo 0
+    Check moved, "SECTION B-B label moved below the dimensions" & IIf(moved, "", " - drag it down about 1/3 in by hand")
 End Sub
 
 Function SX(v As Object, ByVal r As Double) As Double
