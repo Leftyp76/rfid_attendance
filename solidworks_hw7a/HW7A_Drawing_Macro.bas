@@ -19,6 +19,8 @@
 '   - Right: .25, 3.00, .25, R.25, 2 X R.125, .025 X 45 deg TYP
 '   - Title block: 316 STAINLESS STEEL, today's date, title, SHEET 1 OF 4.
 '
+'  v2: view outlines measured from exact edge end points (fixes the MISSING straight-edge dimensions)
+'
 '  SAFETY
 '   - The part's own orientation is read from its holes, so the front view is always the face
 '     of the upright with the flange at the bottom, however the part was modelled.
@@ -671,33 +673,33 @@ Function VisibleEdges(v As Object) As Variant
 End Function
 
 Sub AddEdge(ByVal ent As Object, xf As Object, ByVal sc As Double)
-    Dim crv As Object, cp As Variant, pt As Variant, a As Variant, b As Variant, k As Long, t As Double
-    Dim isL As Boolean, isC As Boolean, cc As Variant, axv As Variant, ctr As Variant, L As Double
+    ' Extents come only from exact geometry: line end points, and circle/arc centre +- radius.
+    ' (For this part every arc's full circle stays inside the outline, so centre +- radius is exact.)
+    Dim crv As Object, cp As Variant, a As Variant, b As Variant, p1 As Variant, p2 As Variant
+    Dim isL As Boolean, isC As Boolean, cc As Variant, axv As Variant, ctr As Variant, L As Double, rr As Double
 
     On Error Resume Next
     Set crv = ent.GetCurve
-    cp = ent.GetCurveParams2                          ' start(0-2) end(3-5) tStart(6) tEnd(7)
     isL = crv.IsLine
     isC = crv.IsCircle
+    cp = ent.GetCurveParams2                          ' start point (0-2), end point (3-5)
+    p1 = Empty: p2 = Empty
+    p1 = ent.GetStartVertex.GetPoint                  ' vertices are the most reliable end points
+    p2 = ent.GetEndVertex.GetPoint
     On Error GoTo 0
-    If crv Is Nothing Or Not IsArray(cp) Then Exit Sub
-
-    ' extents: sample the edge
-    For k = 0 To 8
-        pt = Empty
-        On Error Resume Next
-        t = cp(6) + (cp(7) - cp(6)) * k / 8
-        pt = crv.Evaluate2(t, 0)
-        On Error GoTo 0
-        If IsArray(pt) Then Extend XfPt(xf, pt(0), pt(1), pt(2))
-    Next
-    a = XfPt(xf, cp(0), cp(1), cp(2))
-    b = XfPt(xf, cp(3), cp(4), cp(5))
-    Extend a: Extend b
+    If crv Is Nothing Then Exit Sub
+    If Not IsArray(p1) Or Not IsArray(p2) Then
+        If Not IsArray(cp) Then Exit Sub
+        p1 = Arr3(cp(0), cp(1), cp(2))
+        p2 = Arr3(cp(3), cp(4), cp(5))
+    End If
+    a = XfPt(xf, p1(0), p1(1), p1(2))
+    b = XfPt(xf, p2(0), p2(1), p2(2))
 
     If isL Then
         L = Sqr((b(0) - a(0)) ^ 2 + (b(1) - a(1)) ^ 2)
         If L < 0.003 Then Exit Sub                    ' edge seen end-on
+        Extend a: Extend b
         Set eObj(eN) = ent: eKind(eN) = "L"
         eX1(eN) = a(0): eY1(eN) = a(1): eX2(eN) = b(0): eY2(eN) = b(1)
         eN = eN + 1
@@ -709,10 +711,14 @@ Sub AddEdge(ByVal ent As Object, xf As Object, ByVal sc As Double)
         axv = XfVec(xf, Arr3(cc(3), cc(4), cc(5)))
         If Abs(axv(2)) < 0.9 Then Exit Sub            ' circle seen edge-on
         ctr = XfPt(xf, cc(0), cc(1), cc(2))
+        rr = cc(6) / IN_M * sc
+        Extend a: Extend b
+        Extend Arr3(ctr(0) - rr, ctr(1) - rr, 0#)
+        Extend Arr3(ctr(0) + rr, ctr(1) + rr, 0#)
         Set eObj(eN) = ent: eKind(eN) = "C"
-        eCX(eN) = ctr(0): eCY(eN) = ctr(1): eR(eN) = cc(6) / IN_M * sc
+        eCX(eN) = ctr(0): eCY(eN) = ctr(1): eR(eN) = rr
         eX1(eN) = a(0): eY1(eN) = a(1): eX2(eN) = b(0): eY2(eN) = b(1)
-        eFull(eN) = (Abs(cp(0) - cp(3)) + Abs(cp(1) - cp(4)) + Abs(cp(2) - cp(5)) < 0.000001)
+        eFull(eN) = (Abs(a(0) - b(0)) + Abs(a(1) - b(1)) < 0.0005)
         eN = eN + 1
     End If
 End Sub
