@@ -164,6 +164,8 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 15. **"Already done?" tests must not match a substring**: note 1 contained "IN-LAB ASSIGNMENT #8B", so the title block was skipped. Compare whole note texts.
 16. **Outline curves (silhouettes) can be dimensioned after all**: place sketch points, lines or arcs exactly on the outline with a proven sketch method (`FindCand`: a test point measured from a real edge), then dimension those and check the value. Used for Ø.775, (Ø.493), 30° and R.047 in HW#8B.
 17. **Modelled threads make a view slow**: turn its hidden lines on only at the end, skip helix edges at once, read each view's edges once, and never pick on the sheet over the thread.
+18. **Make every real-edge dimension in a view before adding any sketch item to it** (HW#8B v4 added test points first, and then the edge dimensions failed). Pick each edge two ways (edge table, then a click at its exact sheet position) and trim extra selections. Only then use exact sketch points as a value-checked fallback.
+19. **Rebuild a newly created view before reading its edges** (`ForceRebuild3`). A new DETAIL A reported no edges, so a correct detail was judged wrong and deleted.
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)

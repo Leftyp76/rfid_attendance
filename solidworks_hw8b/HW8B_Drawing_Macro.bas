@@ -32,6 +32,9 @@
 '     scale is read back; tolerance block read back; symbol codes from the playbook
 '   - things a macro cannot pick are listed as TO DO BY HAND with exact steps
 '
+'  v5: real-edge dimensions made before any sketch item touches the view, each edge picked two
+'      ways, then exact sketch points as a checked fallback for anything still missing;
+'      DETAIL A rebuilt before it is judged (a new view had not reported its edges)
 '  v4: part ends from its flat end faces (the body box ran .02 long round the thread and shifted
 '      every pick); title block no longer skipped (note 1 contains the title); outline curves
 '      (dia .775, (dia .493), 30 deg, R.047) dimensioned on exact sketch items; frame leaders and
@@ -585,6 +588,8 @@ Function MakeDetail() As Object
                 If Not dv Is Nothing Then Exit For
             Next
             If Not dv Is Nothing Then
+                swModel.ForceRebuild3 False               ' v5: a new view reports its edges only after a rebuild
+                swModel.GraphicsRedraw2
                 SetViewScale dv, DET_SCALE, 1#
                 If DetailHasNeck(dv) Then used = "method " & cand: Exit For
                 diag = diag & "m" & cand & ": wrong place. "
@@ -619,7 +624,11 @@ End Sub
 ' a real DETAIL A shows the neck: a side-on circle edge .400 long near x = 3.17 .. 3.22
 Function DetailHasNeck(dv As Object) As Boolean
     eKey = ""                                          ' a new detail can reuse a deleted one's name and place
-    DetailHasNeck = (DiaLine(dv, X_SHANK - 0.02, X_NECK2 + 0.03, 0.4, 0.01) >= 0)
+    If DiaLine(dv, X_SHANK - 0.05, X_NECK2 + 0.05, 0.4, 0.02) >= 0 Then DetailHasNeck = True: Exit Function
+    If eN = 0 Then                                     ' no edges reported at all: it cannot be judged, keep it
+        DetailHasNeck = True
+        Info "DETAIL A: SolidWorks reported no edges for it yet, so its place was not checked - look that it shows the neck"
+    End If
 End Function
 
 ' the side-on circle edge (a vertical line on the sheet) of diameter dia between axial positions x1 and x2
@@ -934,32 +943,51 @@ End Sub
 '  Dimensions, notes, GD&T  (text positions measured on the reference, sheet inches)
 ' =====================================================================================
 Sub DimMain()
-    Dim xL As Double, xR As Double, yA As Double, why As String, D As String
+    Dim xL As Double, xR As Double, yA As Double, D As String, d925 As Object
+    Dim w4 As String, w2 As String, w175 As String, w875 As String, w094 As String, w925 As String, w625 As String
+    Dim p4 As String, p2 As String, p175 As String, p875 As String, p094 As String, p925 As String, p625 As String
     D = ChrW(216)
+    eKey = ""
     CollectEdges viewMain
     xL = SX(viewMain, 0): xR = SX(viewMain, 4#): yA = SY(viewMain, 0)
-    skCandMain = FindCand(viewMain, 2.5, 0.2, Array(0#, 0.3, 0#), 2.5, "Main view")
 
-    ' lengths, stacked above the part
-    DimToEnd viewMain, Array(0#, 0.3, 0#), (xL + xR) / 2, yA + 1.22, 4#, "Main     4.000"
-    MakeDimP viewMain, "H", Array(0#, 0.3, 0#), Array(X_COLLAR, 0.4, 0#), (xL + SX(viewMain, X_COLLAR)) / 2, yA + 0.91, 2#, "Main     2.000", "", 3
-    MakeDimP viewMain, "H", Array(0#, 0.3, 0#), Array(X_GRV1, 0.45, 0#), (xL + SX(viewMain, X_GRV1)) / 2, yA + 0.65, 1.75, "Main     1.750", "", 3
-    DimToEnd viewMain, Array(X_SHANK, 0.28, 0#), xL + 2.78, yA + 0.87, 0.875, "Main     .875"
-    MakeDimP viewMain, "H", Array(X_GRV1, 0.45, 0#), Array(X_GRV2, 0.45, 0#), xL + 1.29, yA - 0.77, 0.094, "Main     .094 (groove)", "", 3
-
-    ' diameters, from the side-on circle edges of that size
-    DiaByLen viewMain, 0#, X_COLLAR, 0.925, xL - 1.42, yA, D & ".925", 3, False
-    DatumOnLastDim xL - 1.43, yA - 1.39
-    ' groove bottom: an outline curve, so the diameter goes between two sketch points on it (v4)
-    SkDia viewMain, skCandMain, (X_GRV1 + X_GRV2) / 2, 0.3875, xL - 0.7, yA, "Main     " & D & ".775 (groove bottom)", False, _
-          "Smart Dimension the groove's two bottom curves, place it left of the part next to " & D & ".925, add " & D & " if missing
-    DiaByLen viewMain, X_COLLAR - 0.01, X_SHANK + 0.01, 0.625, xR + 0.67, yA + 0.47, D & ".625", 3, False
-    SkDia viewMain, skCandMain, 3.6, 0.2465, xR + 0.32, yA + 0.8, "Main     (" & D & ".493) thread major", True, _
-             "Smart Dimension the thread's top and bottom crest lines, place it right of the part above " & D & ".625, add " & D & " and tick Parentheses (3 decimals)"
-
-    ' notes with leaders
+    ' phase 1 (v5): real edges only, before any sketch item is added to the view
+    w4 = EdgeH(viewMain, Array(0#, 0.3, 0#), Empty, (xL + xR) / 2, yA + 1.22, 4#)
+    w2 = EdgeH(viewMain, Array(0#, 0.3, 0#), Array(X_COLLAR, 0.4, 0#), (xL + SX(viewMain, X_COLLAR)) / 2, yA + 0.91, 2#)
+    w175 = EdgeH(viewMain, Array(0#, 0.3, 0#), Array(X_GRV1, 0.45, 0#), (xL + SX(viewMain, X_GRV1)) / 2, yA + 0.65, 1.75)
+    w875 = EdgeH(viewMain, Array(X_SHANK, 0.28, 0#), Empty, xL + 2.78, yA + 0.87, 0.875)
+    w094 = EdgeH(viewMain, Array(X_GRV1, -0.45, 0#), Array(X_GRV2, -0.45, 0#), xL + 1.29, yA - 0.77, 0.094)
+    w925 = EdgeDia(viewMain, 0#, X_COLLAR, 0.925, xL - 1.42, yA, False)
+    If Len(w925) = 0 Then Set d925 = lastDim
+    w625 = EdgeDia(viewMain, X_COLLAR - 0.01, X_SHANK + 0.01, 0.625, xR + 0.67, yA + 0.47, False)
     LeaderNote2 viewMain, Array(0.05, 0.44, 0#), Array(0#, 0.39, 0#), "2X .05 X 45<MOD-DEG>", xL - 1.45, yA + 0.81, "Main     2X .05 X 45" & ChrW(176)
     ThreadNote xR + 0.57, yA - 0.6
+
+    ' phase 2: exact sketch points on the part for anything phase 1 could not do (value checked)
+    skCandMain = FindCand(viewMain, 2.5, 0.2, Array(0#, 0.3, 0#), 2.5, "Main view")
+    If Len(w4) > 0 Then p4 = PtH(viewMain, skCandMain, 0#, 0.4125, 4#, 0.2, (xL + xR) / 2, yA + 1.22, 4#)
+    If Len(w2) > 0 Then p2 = PtH(viewMain, skCandMain, 0#, 0.4125, X_COLLAR, 0.45, (xL + SX(viewMain, X_COLLAR)) / 2, yA + 0.91, 2#)
+    If Len(w175) > 0 Then p175 = PtH(viewMain, skCandMain, 0#, 0.4125, X_GRV1, 0.4625, (xL + SX(viewMain, X_GRV1)) / 2, yA + 0.65, 1.75)
+    If Len(w875) > 0 Then p875 = PtH(viewMain, skCandMain, X_SHANK, 0.3125, 4#, 0.2, xL + 2.78, yA + 0.87, 0.875)
+    If Len(w094) > 0 Then p094 = PtH(viewMain, skCandMain, X_GRV1, -0.4625, X_GRV2, -0.4625, xL + 1.29, yA - 0.77, 0.094)
+    If Len(w925) > 0 Then
+        p925 = SkDiaWhy(viewMain, skCandMain, 1#, 0.4625, xL - 1.42, yA, False)
+        If Len(p925) = 0 Then Set d925 = lastDim
+    End If
+    If Len(w625) > 0 Then p625 = SkDiaWhy(viewMain, skCandMain, 2.5, 0.3125, xR + 0.67, yA + 0.47, False)
+    Report2 w4, p4, "Main     4.000"
+    Report2 w2, p2, "Main     2.000"
+    Report2 w175, p175, "Main     1.750"
+    Report2 w875, p875, "Main     .875"
+    Report2 w094, p094, "Main     .094 (groove)"
+    Report2 w925, p925, "Main     " & D & ".925"
+    Report2 w625, p625, "Main     " & D & ".625"
+    Set lastDim = d925
+    DatumOnLastDim xL - 1.43, yA - 1.39
+    SkDia viewMain, skCandMain, (X_GRV1 + X_GRV2) / 2, 0.3875, xL - 0.7, yA, "Main     " & D & ".775 (groove bottom)", False, _
+          "Smart Dimension the groove's two bottom curves, place it left of the part next to " & D & ".925, add " & D & " if missing"
+    SkDia viewMain, skCandMain, 3.6, 0.2465, xR + 0.32, yA + 0.8, "Main     (" & D & ".493) thread major", True, _
+          "Smart Dimension the thread's top and bottom crest lines, place it right of the part above " & D & ".625, add " & D & " and tick Parentheses (3 decimals)"
 End Sub
 
 ' horizontal dimension from pa to the right end (x = 4.000); the right end face is tried at several heights
@@ -1244,13 +1272,20 @@ Function SymInLibrary(ByVal sym As String) As Boolean
 End Function
 
 Sub DimDetail()
-    Dim dX As Double, dY As Double, why As String, D As String
+    Dim dX As Double, dY As Double, D As String, w094 As String, w400 As String, p094 As String, p400 As String, cand As Integer
     D = ChrW(216)
+    eKey = ""
     CollectEdges viewDet
     dX = SX(viewDet, X_SHANK): dY = SY(viewDet, 0)
-    MakeDimP viewDet, "H", Array(X_SHANK, 0.28, 0#), Array(X_NECK2, 0.15, 0#), dX - 0.52, dY + 1.106, 0.094, "Detail A .094 (neck)", "", 3
-    DiaByLen viewDet, X_SHANK, X_NECK2 + 0.01, 0.4, dX + 1.95, dY, D & ".400", 3, False
-    DetailSketchDims
+    ' real edges first (v5), then exact sketch points
+    w094 = EdgeH(viewDet, Array(X_SHANK, 0.28, 0#), Array(X_NECK2, 0.15, 0#), dX - 0.52, dY + 1.106, 0.094)
+    w400 = EdgeDia(viewDet, X_SHANK - 0.01, X_NECK2 + 0.02, 0.4, dX + 1.95, dY, False)
+    cand = FindCand(viewDet, X_SHANK + 0.075, 0.27, Array(X_SHANK, 0.28, 0#), 0.075, "DETAIL A")
+    If Len(w094) > 0 Then p094 = PtH(viewDet, cand, X_SHANK, 0.3125, X_NECK2, 0.2, dX - 0.52, dY + 1.106, 0.094)
+    If Len(w400) > 0 Then p400 = SkDiaWhy(viewDet, cand, X_SHANK + 0.07, 0.2, dX + 1.95, dY, False)
+    Report2 w094, p094, "Detail A .094 (neck)"
+    Report2 w400, p400, "Detail A " & D & ".400"
+    DetailSketchDims cand
 End Sub
 
 ' NOTES block, top left: each number and each text is its own note so the columns line up exactly
@@ -1545,6 +1580,7 @@ Function SkPoint(v As Object, ByVal x As Double, ByVal r As Double, ByVal cand A
     swModel.SketchManager.AddToDB = True
     Set SkPoint = swModel.SketchManager.CreatePoint(p(0), p(1), 0#)
     swModel.SketchManager.AddToDB = False
+    eKey = ""                                          ' the view changed: read its edges again next time
     swModel.ClearSelection2 True
 End Function
 
@@ -1558,6 +1594,7 @@ Function SkLine(v As Object, ByVal x1 As Double, ByVal r1 As Double, ByVal x2 As
     swModel.SketchManager.AddToDB = True
     Set SkLine = swModel.SketchManager.CreateLine(p(0), p(1), 0#, q(0), q(1), 0#)
     swModel.SketchManager.AddToDB = False
+    eKey = ""
     swModel.ClearSelection2 True
 End Function
 
@@ -1573,6 +1610,7 @@ Function SkArc(v As Object, ByVal xc As Double, ByVal rc As Double, ByVal xs As 
     swModel.SketchManager.AddToDB = True
     Set SkArc = swModel.SketchManager.CreateArc(c(0), c(1), 0#, s(0), s(1), 0#, e(0), e(1), 0#, dirn)
     swModel.SketchManager.AddToDB = False
+    eKey = ""
     swModel.ClearSelection2 True
 End Function
 
@@ -1653,10 +1691,9 @@ Sub SkDia(v As Object, ByVal cand As Integer, ByVal x As Double, ByVal r As Doub
 End Sub
 
 ' DETAIL A's 30 deg chamfer and R.047 fillet: a sketch line / arc laid exactly over each outline
-Sub DetailSketchDims()
-    Dim cand As Integer, ln As Object, arc As Object, why As String, dX As Double, dY As Double, t30 As Double
+Sub DetailSketchDims(ByVal cand As Integer)
+    Dim ln As Object, arc As Object, why As String, dX As Double, dY As Double, t30 As Double
     dX = SX(viewDet, X_SHANK): dY = SY(viewDet, 0)
-    cand = FindCand(viewDet, X_SHANK + 0.075, 0.27, Array(X_SHANK, 0.28, 0#), 0.075, "DETAIL A")
     If cand < 0 Then
         ToDo "Detail A 30" & ChrW(176) & ": Smart Dimension the shank's end face line and the slanted chamfer line at the thread start; place it above"
         ToDo "Detail A 3 X R.047: Smart Dimension the lower fillet curve at the neck, place it lower right, type ""3 X "" in front (3 decimals)"
@@ -1704,6 +1741,162 @@ End Sub
 Function Tan30() As Double
     Tan30 = 1# / Sqr(3#)
 End Function
+
+' =====================================================================================
+'  v5: robust dimensioning - real edges first (two ways to pick each), then exact sketch points
+' =====================================================================================
+
+' nearest edge-table entity to part point p (within .008 in on the sheet); -1 if none
+Function TableIdx(v As Object, p As Variant) As Long
+    Dim s As Variant, i As Long, bd As Double, d As Double
+    TableIdx = -1
+    CollectEdges v
+    s = SheetPt(v, CDbl(p(0)), CDbl(p(1)), CDbl(p(2)))
+    bd = 0.008
+    For i = 0 To eN - 1
+        d = EntDist(i, s(0), s(1))
+        If d < bd Then bd = d: TableIdx = i
+    Next
+End Function
+
+' select the real edge through part point p.  how 1: from the edge table;  how 2: a click at its
+' exact sheet position.  True when exactly one new item, in view v, is selected.
+Function PickEdge(v As Object, p As Variant, ByVal append As Boolean, ByVal how As Integer) As Boolean
+    Dim n0 As Long, s As Variant, i As Long
+    n0 = 0
+    If append Then n0 = swModel.SelectionManager.GetSelectedObjectCount2(-1)
+    If how = 1 Then
+        i = TableIdx(v, p)
+        If i < 0 Then Exit Function
+        SelEdge v, i, append
+    Else
+        s = SheetPt(v, CDbl(p(0)), CDbl(p(1)), CDbl(p(2)))
+        On Error Resume Next
+        swModel.Extension.SelectByID2 "", "EDGE", s(0) * IN_M, s(1) * IN_M, 0#, append, 0, Nothing, 0
+        On Error GoTo 0
+        KeepOneIn v, n0
+    End If
+    PickEdge = (swModel.SelectionManager.GetSelectedObjectCount2(-1) = n0 + 1)
+End Function
+
+' the right end (x = 4.000): how 1 the end line from the edge table, how 2 a click on the end face
+Function PickEnd(v As Object, ByVal append As Boolean, ByVal how As Integer) As Boolean
+    Dim n0 As Long, i As Long
+    n0 = 0
+    If append Then n0 = swModel.SelectionManager.GetSelectedObjectCount2(-1)
+    If how = 1 Then
+        i = EndLine(v)
+        If i < 0 Then Exit Function
+        SelEdge v, i, append
+        PickEnd = (swModel.SelectionManager.GetSelectedObjectCount2(-1) = n0 + 1)
+    Else
+        PickEnd = PickEdge(v, Array(4#, 0.1, 0#), append, 2)
+    End If
+End Function
+
+' horizontal dimension between real edges (pb Empty = the right end); "" when it measured right
+Function EdgeH(v As Object, pa As Variant, pb As Variant, ByVal tx As Double, ByVal ty As Double, ByVal expect As Double) As String
+    Dim how As Integer, okA As Boolean, okB As Boolean, why As String
+    why = "no edges"
+    For how = 1 To 2
+        swModel.ClearSelection2 True
+        swDraw.ActivateView v.GetName2
+        okA = PickEdge(v, pa, False, how)
+        If IsArray(pb) Then okB = PickEdge(v, pb, True, how) Else okB = PickEnd(v, True, how)
+        If okA And okB Then
+            why = TryDimSel("H", 2, tx, ty, expect, "", 3, "", False, True)
+            If Len(why) = 0 Then EdgeH = "": Exit Function
+        Else
+            why = "edge" & IIf(okA Or okB, "", "s") & " not picked" & IIf(okA, "", " (first)") & IIf(okB, "", " (second)")
+        End If
+    Next
+    swModel.ClearSelection2 True
+    EdgeH = why
+End Function
+
+' horizontal dimension between two exact sketch points on the part (proven sketch method cand)
+Function PtH(v As Object, ByVal cand As Integer, ByVal x1 As Double, ByVal r1 As Double, ByVal x2 As Double, ByVal r2 As Double, _
+             ByVal tx As Double, ByVal ty As Double, ByVal expect As Double) As String
+    Dim p1 As Object, p2 As Object, why As String
+    If cand < 0 Then PtH = "no sketch method worked in this view": Exit Function
+    Set p1 = SkPoint(v, x1, r1, cand)
+    Set p2 = SkPoint(v, x2, r2, cand)
+    why = "sketch points not made"
+    If Not p1 Is Nothing And Not p2 Is Nothing Then
+        swModel.ClearSelection2 True
+        swDraw.ActivateView v.GetName2
+        On Error Resume Next
+        p1.Select4 False, Nothing
+        p2.Select4 True, Nothing
+        On Error GoTo 0
+        why = TryDimSel("H", 2, tx, ty, expect, "", 3, "", False, True)
+    End If
+    If Len(why) > 0 Then DeleteSeg p1: DeleteSeg p2
+    PtH = why
+End Function
+
+' diameter on the side-on circle edge of that size between x1 and x2 (two ways to pick, two kinds)
+Function EdgeDia(v As Object, ByVal x1 As Double, ByVal x2 As Double, ByVal dia As Double, ByVal tx As Double, ByVal ty As Double, _
+                 ByVal paren As Boolean) As String
+    Dim i As Long, why As String, how As Integer, k As Integer, mx As Double, my As Double
+    i = DiaLine(v, x1, x2, dia, 0.006)
+    If i < 0 Then EdgeDia = "no " & Format(dia, ".000") & " circle edge": Exit Function
+    mx = (eX1(i) + eX2(i)) / 2: my = eY1(i) + (eY2(i) - eY1(i)) * 0.85      ' near one end, off the centre line
+    For how = 1 To 2
+        For k = 1 To 2
+            swModel.ClearSelection2 True
+            swDraw.ActivateView v.GetName2
+            If how = 1 Then
+                SelEdge v, i, False
+            Else
+                On Error Resume Next
+                swModel.Extension.SelectByID2 "", "EDGE", mx * IN_M, my * IN_M, 0#, False, 0, Nothing, 0
+                On Error GoTo 0
+                KeepOneIn v, 0
+            End If
+            If swModel.SelectionManager.GetSelectedObjectCount2(-1) = 1 Then
+                why = TryDimSel(IIf(k = 1, "VL", "S1"), 1, tx, ty, dia, "<MOD-DIAM>", 3, "", paren, True)
+                If Len(why) = 0 Then EdgeDia = "": Exit Function
+            Else
+                why = "edge not picked"
+            End If
+        Next
+    Next
+    swModel.ClearSelection2 True
+    EdgeDia = why
+End Function
+
+' diameter between two exact sketch points at axial position x, radius r (top and bottom)
+Function SkDiaWhy(v As Object, ByVal cand As Integer, ByVal x As Double, ByVal r As Double, ByVal tx As Double, ByVal ty As Double, _
+                  ByVal paren As Boolean) As String
+    Dim p1 As Object, p2 As Object, why As String
+    If cand < 0 Then SkDiaWhy = "no sketch method worked in this view": Exit Function
+    Set p1 = SkPoint(v, x, r, cand)
+    Set p2 = SkPoint(v, x, -r, cand)
+    why = "sketch points not made"
+    If Not p1 Is Nothing And Not p2 Is Nothing Then
+        swModel.ClearSelection2 True
+        swDraw.ActivateView v.GetName2
+        On Error Resume Next
+        p1.Select4 False, Nothing
+        p2.Select4 True, Nothing
+        On Error GoTo 0
+        why = TryDimSel("V", 2, tx, ty, 2 * r, "<MOD-DIAM>", 3, "", paren, True)
+    End If
+    If Len(why) > 0 Then DeleteSeg p1: DeleteSeg p2
+    SkDiaWhy = why
+End Function
+
+Sub Report2(ByVal why1 As String, ByVal why2 As String, ByVal label As String)
+    ' why1: real edges, why2: sketch points ("-" = not needed)
+    If Len(why1) = 0 Then
+        Check True, label
+    ElseIf Len(why2) = 0 Then
+        Check True, label & " (on exact sketch points: real edges gave " & why1 & ")"
+    Else
+        Check False, label & " - MISSING (edges: " & why1 & "; points: " & why2 & ")"
+    End If
+End Sub
 
 ' =====================================================================================
 '  Dimension and selection helpers  (from HW#7D)
