@@ -14,6 +14,7 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 | `solidworks_hw8a/` | Drawing with **SECTION A-A**, hole callouts, toleranced dims (±, limit, bilateral), datum and parallelism frame, 1:3 shaded iso; plus a part macro that changes an engraving depth | Section views, tolerances, GD&T, hole callouts |
 | `solidworks_hw8b/` | Turned part with **DETAIL A 3:1**, left end view, NOTES block, circularity / runout frames, datum on a dimension; hand steps listed as TO DO | Turned parts, detail views, notes |
 | `solidworks_hw8c/` | Elbow casting: **VIEW A-A auxiliary** view square to an angled flange, BASIC (boxed) dims, position / angularity frames, datums on a face and on a dimension, DETAIL B 1:1, iso 1:4 | Auxiliary views, GD&T, basic dimensions |
+| `solidworks_hw8d/` | Plate with **SECTION A-A and B-B** (labels hidden), hole callouts (deep / counterbore / countersink) each with a position frame to A, B, C, BASIC dims, flatness and parallelism, datums on edges, balloon to the logo, NOTES 1-3 | Two section views, hole callouts with frames, balloons |
 | `solidworks_tools/` | `sw_extract.py` reads a SolidWorks file, `vba_static_check.py` checks a macro | Every job |
 
 **Start every new drawing macro from the newest working drawing macro** (`HW8A_Drawing_Macro.bas` v4; `HW7D` for detail views). Read section 4.8 first: it lists the mistakes HW#8A v1–v4 made, and the new macro must not repeat them. Keep its proven helpers unchanged and replace only the part-specific procedures.
@@ -173,6 +174,8 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 23. **BASIC dimensions** are tolerance type 1 (`swTolBASIC`), set and read back like any tolerance. A position frame's Ø comes from the `Dia1` argument of `SetFrameSymbols2`. Codes: position `<IGTOL-POSI>`, angularity `<IGTOL-ANGULAR>`.
 24. **A local variable named like a procedure hides it** (HW#8C v1: `sp = SP(...)` indexed the empty variable, because VBA ignores case). `vba_static_check.py` now flags this.
 25. **Capture `Err.Number` and `Err.Description` first in an error handler.** Clean-up calls that use `On Error Resume Next` / `Err.Clear` wipe them, and HW#8C v1 showed "Error 0". Give each big step its own handler so one failure doesn't stop the whole drawing.
+26. **"VIEW A-A" with an arrow and a letter at BOTH ends of a cutting line is a section view**, even when it looks like a plain projection (HW#8C). Make it with a cutting line and `CreateSectionViewAt5`, not `CreateAuxiliaryViewAt2` (SolidWorks refused the auxiliary view and the fallback plain view had no arrows or label). A cutting line that only clips the part leaves a stray hatched piece; keep the line fully across the part or outside it.
+27. **Draw the cutting lines after every real-edge dimension in the parent view** (they are sketch items, lesson 18), prove each one with a test dimension that is deleted again, and check each section's direction on its own axes (`FrameOK`), flipping with `SetReversedCutDirection`.
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)
