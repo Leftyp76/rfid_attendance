@@ -32,6 +32,9 @@
 '     scale is read back; tolerance block read back; symbol codes from the playbook
 '   - things a macro cannot pick are listed as TO DO BY HAND with exact steps
 '
+'  v2: much faster on the modelled threads: the main view's hidden lines are turned on only at
+'      the end, thread helix edges are skipped at once, each view's edges are read once;
+'      the current step shows in the SolidWorks status bar
 '  v1: first version
 '
 '  SAFETY
@@ -45,6 +48,7 @@ Dim swApp As Object, swMath As Object, swPart As Object, swModel As Object, swDr
 Dim partPath As String, curStep As String, report As String, problems As String, todoList As String
 Dim nOK As Long, nBad As Long, nTodo As Long
 Dim lastDim As Object                      ' the dimension TryDimSel made last
+Dim eKey As String                         ' which view (and where / how big) the edge table holds
 Dim oldInputDim As Boolean, savedInputDim As Boolean
 
 Const IN_M = 0.0254
@@ -102,20 +106,20 @@ Sub main()
     report = "": problems = "": todoList = "": nOK = 0: nBad = 0: nTodo = 0
     detailPending = False: resumed = False
     Set viewMain = Nothing: Set viewLeft = Nothing: Set viewDet = Nothing: Set viewIso = Nothing   ' VBA keeps these between runs
-    Set lastDim = Nothing
+    Set lastDim = Nothing: eKey = ""
     NoDimDialog True
 
-    curStep = "Step 1 - find the open part":           FindPart
-    curStep = "Step 2 - read the part orientation":    FindOrientation
-    curStep = "Step 3 - continue an open drawing?":    resumed = ResumeDrawing()
+    Stage "Step 1 - find the open part":           FindPart
+    Stage "Step 2 - read the part orientation":    FindOrientation
+    Stage "Step 3 - continue an open drawing?":    resumed = ResumeDrawing()
     If Not resumed Then
-        curStep = "Step 3 - find your template":       tmpl = FindTemplate()
-        curStep = "Step 4 - new drawing":              NewDrawing tmpl
-        curStep = "Step 5 - main, left and iso views": MakeViews
+        Stage "Step 3 - find your template":       tmpl = FindTemplate()
+        Stage "Step 4 - new drawing":              NewDrawing tmpl
+        Stage "Step 5 - main, left and iso views": MakeViews
     End If
     ' the main view is dimensioned BEFORE DETAIL A exists (a detail makes SolidWorks double-select
     ' main-view edges and refuse the dimensions)
-    curStep = "Step 6 - main and left view dimensions"
+    Stage "Step 6 - main and left view dimensions"
     ClearCommand
     If HasDims(viewMain) Then
         Check True, "Main view dimensions already there - left as they are"
@@ -129,38 +133,41 @@ Sub main()
         GtolMain
     End If
     If Not resumed Then
-        curStep = "Step 7 - DETAIL A"
+        Stage "Step 7 - DETAIL A"
         ClearCommand
         Set viewDet = MakeDetail()
         If viewDet Is Nothing Then detailPending = True
     End If
     If Not viewDet Is Nothing Then
-        curStep = "Step 8 - DETAIL A dimensions"
+        Stage "Step 8 - DETAIL A dimensions"
         FinishDetail
         ClearCommand
         If HasDims(viewDet) Then Check True, "DETAIL A dimensions already there - left as they are" Else DimDetail
     End If
-    curStep = "Step 9 - notes"
+    Stage "Step 9 - notes"
     ClearCommand
     If SheetHasText("FOR 5/16-18 TAP") Then
         Check True, "NOTES already there - left as they are"
     Else
         AddNotes
     End If
-    curStep = "Step 10 - title block"
+    Stage "Step 10 - title block"
     ClearCommand
     If SheetHasText("IN-LAB ASSIGNMENT #8B") Then
         Check True, "Title block already filled in - left as it is"
     Else
         TitleBlock
     End If
-    curStep = "Step 11 - centre marks and centrelines" ' last: the centreline command can swallow later clicks
+    Stage "Step 11 - centre marks and centrelines" ' last: the centreline command can swallow later clicks
     LeftCentreMark
     CentreLines viewMain
     If Not viewDet Is Nothing Then CentreLines viewDet
     ClearCommand
-    curStep = "Step 12 - scales and alignment":       CheckScalesAndAlignment
-    curStep = "Step 13 - finish":                     FinishSheet
+    Stage "Step 12 - hidden lines on in the main view (tapped hole)"
+    SetMode viewMain, DM_HIDDEN_VISIBLE, "Main"
+    eKey = ""
+    Stage "Step 12 - scales and alignment":       CheckScalesAndAlignment
+    Stage "Step 13 - finish":                     FinishSheet
     NoDimDialog False
 
     If detailPending Then
@@ -178,7 +185,7 @@ Sub main()
            "Next: enter your last name to save the drawing and the PDF.", _
            IIf(nBad = 0, vbInformation, vbExclamation), DRAW_NAME
 
-    curStep = "Step 14 - save drawing and PDF":       SaveAll
+    Stage "Step 14 - save drawing and PDF":       SaveAll
     Exit Sub
 Fail:
     NoDimDialog False
@@ -199,6 +206,14 @@ Sub NoDimDialog(ByVal turnOff As Boolean)
         swApp.SetUserPreferenceToggle 10, oldInputDim
         savedInputDim = False
     End If
+End Sub
+
+' show the step in SolidWorks' status bar (the modelled threads make some steps slow)
+Sub Stage(ByVal s As String)
+    curStep = s
+    On Error Resume Next
+    swApp.Frame.SetStatusBarText DRAW_NAME & " macro: " & s & "   (modelled threads make SolidWorks slow - please wait)"
+    DoEvents
 End Sub
 
 ' a step the macro cannot do (SolidWorks gives macros no access to it): listed for you, not a problem
@@ -402,7 +417,7 @@ Sub MakeViews()
     EnsureSheetScale
     ok = SetViewScale(viewMain, 1#, 1#)
     Check ok, "Main view scale 1:1 (reads " & ScaleTxt(viewMain) & ")"
-    SetMode viewMain, DM_HIDDEN_VISIBLE, "Main"
+    SetMode viewMain, DM_HIDDEN_REMOVED, "Main (hidden lines turned on at the end - much faster with the modelled threads)"
     PlaceView viewMain, 0#, 0#, 0#, MAIN_X, MAIN_Y, True, True, "Main view placed (left end at " & Format(MAIN_X, "0.00") & ", axis at " & Format(MAIN_Y, "0.00") & ")"
 
     ' left end view, projected to the left (third angle), level with the main view
@@ -446,6 +461,7 @@ Sub EnsureSheetScale()
             If ok Then Exit For
             sh.SetProperties2 CLng(p(0)), CLng(p(1)), 1#, SHEET_DEN, False, CDbl(p(5)), CDbl(p(6)), True
             swModel.ForceRebuild3 False
+            eKey = ""
         End If
     Next
     p = Empty
@@ -468,6 +484,7 @@ Function SetViewScale(v As Object, ByVal num As Double, ByVal den As Double) As 
         v.ScaleRatio = va
         If Abs(ViewSc(v) - want) > 0.0005 Then Err.Clear: v.ScaleDecimal = want
         swModel.ForceRebuild3 False
+        eKey = ""
         On Error GoTo 0
     End If
     SetViewScale = (Abs(ViewSc(v) - want) < 0.0005)
@@ -570,6 +587,7 @@ End Sub
 
 ' a real DETAIL A shows the neck: a side-on circle edge .400 long near x = 3.17 .. 3.22
 Function DetailHasNeck(dv As Object) As Boolean
+    eKey = ""                                          ' a new detail can reuse a deleted one's name and place
     DetailHasNeck = (DiaLine(dv, X_SHANK, X_NECK2 + 0.01, 0.4, 0.01) >= 0)
 End Function
 
@@ -626,6 +644,7 @@ Function ResumeDrawing() As Boolean
     swDraw.EditSheet                                  ' normal sheet mode (not sheet format, not a sketch)
     swModel.ClearSelection2 True
     swModel.ForceRebuild3 False
+    eKey = ""
     swModel.GraphicsRedraw2
     On Error GoTo 0
     If viewDet Is Nothing Then detailPending = True
@@ -1523,7 +1542,14 @@ End Sub
 '  Edge table: every visible edge of a view, in sheet inches  (from HW#7D)
 ' =====================================================================================
 Sub CollectEdges(v As Object)
-    Dim ents As Variant, i As Long, xf As Object, sc As Double
+    Dim ents As Variant, i As Long, xf As Object, sc As Double, pos As Variant, key As String, m As Long
+    ' read a view's edges once; read again only if the view moved, changed scale or display (v2: speed)
+    On Error Resume Next
+    pos = v.Position: m = -1: m = v.GetDisplayMode2
+    key = v.GetName2 & "|" & Format(pos(0), "0.000000") & "|" & Format(pos(1), "0.000000") & "|" & v.ScaleDecimal & "|" & m
+    On Error GoTo 0
+    If key = eKey And eN > 0 Then Exit Sub
+    eKey = key
     eN = 0
     ReDim eObj(0 To EMAX - 1): ReDim eKind(0 To EMAX - 1)
     ReDim eX1(0 To EMAX - 1): ReDim eY1(0 To EMAX - 1): ReDim eX2(0 To EMAX - 1): ReDim eY2(0 To EMAX - 1)
@@ -1555,14 +1581,15 @@ Function VisibleEdges(v As Object) As Variant
         If Not IsArray(r) Then r = v.GetVisibleEntities(Nothing, CLng(tp))
         On Error GoTo 0
         If IsArray(r) Then
-            n = 0
-            For i = LBound(r) To UBound(r)
+            n = 0                                     ' v2: judge each type on a sample of 40 (speed)
+            For i = LBound(r) To IIf(UBound(r) > LBound(r) + 39, LBound(r) + 39, UBound(r))
                 Set c = Nothing
                 On Error Resume Next
                 Set c = r(i).GetCurve
                 On Error GoTo 0
                 If Not c Is Nothing Then n = n + 1
             Next
+            n = n * (UBound(r) - LBound(r) + 1) / IIf(UBound(r) - LBound(r) + 1 > 40, 40, UBound(r) - LBound(r) + 1)
             If n > bestN Then bestN = n: best = r
         End If
     Next
@@ -1579,6 +1606,7 @@ Sub AddEdge(ByVal ent As Object, xf As Object, ByVal sc As Double)
     Set crv = ent.GetCurve
     isL = crv.IsLine
     isC = crv.IsCircle
+    If Not (isL Or isC) Then Exit Sub                ' helix / spline edges (modelled threads) are never picked: skip them at once
     cp = ent.GetCurveParams2                          ' start point (0-2), end point (3-5)
     p1 = Empty: p2 = Empty
     p1 = ent.GetStartVertex.GetPoint                  ' vertices are the most reliable end points

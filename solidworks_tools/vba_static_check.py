@@ -19,7 +19,7 @@ And Or True False Nothing Empty Long Double String Boolean Integer Variant Objec
 MsgBox InputBox IIf Left Mid Len Trim UCase InStr InStrRev Replace Format Date Now Abs Sqr Array IsArray IsEmpty CLng CDbl
 CStr CInt Environ Dir ChrW Chr FreeFile Open Output Print Close Application CreateObject LBound UBound ReDim Err Const
 Option Explicit Raise Clear Atn Sgn Mod Fail Preserve Call
-LOF EOF Input FileLen Line Cos Sin Tan Split Join Round Space Hex TypeName'''.split())
+LOF EOF Input FileLen Line Cos Sin Tan Split Join Round Space Hex TypeName DoEvents'''.split())
 BUILTINS = ['Sgn', 'Len', 'Left', 'Right', 'Mid', 'Format', 'Date', 'Dir', 'Abs', 'Sqr', 'Atn', 'Val', 'Str', 'Int', 'Fix', 'Log', 'Exp']
 
 def main():
