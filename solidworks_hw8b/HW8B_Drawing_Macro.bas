@@ -32,6 +32,9 @@
 '     scale is read back; tolerance block read back; symbol codes from the playbook
 '   - things a macro cannot pick are listed as TO DO BY HAND with exact steps
 '
+'  v6: lean: every dimension on exact sketch points after one placement test per view, picks by a
+'      single click (no edge-table reads while dimensioning). v5's repeated edge reads and
+'      trial dimensions on the modelled threads crashed SolidWorks after 20 minutes
 '  v5: real-edge dimensions made before any sketch item touches the view, each edge picked two
 '      ways, then exact sketch points as a checked fallback for anything still missing;
 '      DETAIL A rebuilt before it is judged (a new view had not reported its edges)
@@ -616,7 +619,7 @@ Sub FinishDetail()
     ok = SetViewScale(viewDet, DET_SCALE, 1#)
     Check ok, "DETAIL A scale 3:1 (reads " & ScaleTxt(viewDet) & ")" & IIf(ok, "", " - set Scale > Use custom scale 3:1")
     PlaceView viewDet, X_SHANK, 0#, 0#, DET_X, DET_Y, True, True, "DETAIL A placed (shank end face, axis)"
-    If Not DetailHasNeck(viewDet) Then
+    If resumed And Not DetailHasNeck(viewDet) Then     ' (one the macro made was already checked)
         Check False, "DETAIL A does not show the " & ChrW(216) & ".400 neck - its circle is in the wrong place. Delete DETAIL A and its circle, make it again round the neck"
     End If
 End Sub
@@ -943,51 +946,32 @@ End Sub
 '  Dimensions, notes, GD&T  (text positions measured on the reference, sheet inches)
 ' =====================================================================================
 Sub DimMain()
-    Dim xL As Double, xR As Double, yA As Double, D As String, d925 As Object
-    Dim w4 As String, w2 As String, w175 As String, w875 As String, w094 As String, w925 As String, w625 As String
-    Dim p4 As String, p2 As String, p175 As String, p875 As String, p094 As String, p925 As String, p625 As String
+    ' v6: every dimension on exact sketch points (one placement test for the view). v5 also tried the
+    ' real edges several ways; on the modelled threads that re-read and re-built the views until
+    ' SolidWorks crashed. The points sit exactly on the part, and every value is read back.
+    Dim xL As Double, xR As Double, yA As Double, D As String, d925 As Object, c As Integer, w As String
     D = ChrW(216)
-    eKey = ""
-    CollectEdges viewMain
     xL = SX(viewMain, 0): xR = SX(viewMain, 4#): yA = SY(viewMain, 0)
-
-    ' phase 1 (v5): real edges only, before any sketch item is added to the view
-    w4 = EdgeH(viewMain, Array(0#, 0.3, 0#), Empty, (xL + xR) / 2, yA + 1.22, 4#)
-    w2 = EdgeH(viewMain, Array(0#, 0.3, 0#), Array(X_COLLAR, 0.4, 0#), (xL + SX(viewMain, X_COLLAR)) / 2, yA + 0.91, 2#)
-    w175 = EdgeH(viewMain, Array(0#, 0.3, 0#), Array(X_GRV1, 0.45, 0#), (xL + SX(viewMain, X_GRV1)) / 2, yA + 0.65, 1.75)
-    w875 = EdgeH(viewMain, Array(X_SHANK, 0.28, 0#), Empty, xL + 2.78, yA + 0.87, 0.875)
-    w094 = EdgeH(viewMain, Array(X_GRV1, -0.45, 0#), Array(X_GRV2, -0.45, 0#), xL + 1.29, yA - 0.77, 0.094)
-    w925 = EdgeDia(viewMain, 0#, X_COLLAR, 0.925, xL - 1.42, yA, False)
-    If Len(w925) = 0 Then Set d925 = lastDim
-    w625 = EdgeDia(viewMain, X_COLLAR - 0.01, X_SHANK + 0.01, 0.625, xR + 0.67, yA + 0.47, False)
-    LeaderNote2 viewMain, Array(0.05, 0.44, 0#), Array(0#, 0.39, 0#), "2X .05 X 45<MOD-DEG>", xL - 1.45, yA + 0.81, "Main     2X .05 X 45" & ChrW(176)
-    ThreadNote xR + 0.57, yA - 0.6
-
-    ' phase 2: exact sketch points on the part for anything phase 1 could not do (value checked)
-    skCandMain = FindCand(viewMain, 2.5, 0.2, Array(0#, 0.3, 0#), 2.5, "Main view")
-    If Len(w4) > 0 Then p4 = PtH(viewMain, skCandMain, 0#, 0.4125, 4#, 0.2, (xL + xR) / 2, yA + 1.22, 4#)
-    If Len(w2) > 0 Then p2 = PtH(viewMain, skCandMain, 0#, 0.4125, X_COLLAR, 0.45, (xL + SX(viewMain, X_COLLAR)) / 2, yA + 0.91, 2#)
-    If Len(w175) > 0 Then p175 = PtH(viewMain, skCandMain, 0#, 0.4125, X_GRV1, 0.4625, (xL + SX(viewMain, X_GRV1)) / 2, yA + 0.65, 1.75)
-    If Len(w875) > 0 Then p875 = PtH(viewMain, skCandMain, X_SHANK, 0.3125, 4#, 0.2, xL + 2.78, yA + 0.87, 0.875)
-    If Len(w094) > 0 Then p094 = PtH(viewMain, skCandMain, X_GRV1, -0.4625, X_GRV2, -0.4625, xL + 1.29, yA - 0.77, 0.094)
-    If Len(w925) > 0 Then
-        p925 = SkDiaWhy(viewMain, skCandMain, 1#, 0.4625, xL - 1.42, yA, False)
-        If Len(p925) = 0 Then Set d925 = lastDim
+    c = FindCand(viewMain, 2.5, 0.2, Array(0#, 0.3, 0#), 2.5, "Main view")
+    skCandMain = c
+    If c < 0 Then
+        Check False, "Main view: no way to place sketch points was proved, so its dimensions could not be made (see INFO lines)"
+        Exit Sub
     End If
-    If Len(w625) > 0 Then p625 = SkDiaWhy(viewMain, skCandMain, 2.5, 0.3125, xR + 0.67, yA + 0.47, False)
-    Report2 w4, p4, "Main     4.000"
-    Report2 w2, p2, "Main     2.000"
-    Report2 w175, p175, "Main     1.750"
-    Report2 w875, p875, "Main     .875"
-    Report2 w094, p094, "Main     .094 (groove)"
-    Report2 w925, p925, "Main     " & D & ".925"
-    Report2 w625, p625, "Main     " & D & ".625"
+    w = PtH(viewMain, c, 0#, 0.4125, 4#, 0.2, (xL + xR) / 2, yA + 1.22, 4#):                              ReportW w, "Main     4.000"
+    w = PtH(viewMain, c, 0#, 0.4125, X_COLLAR, 0.45, (xL + SX(viewMain, X_COLLAR)) / 2, yA + 0.91, 2#):  ReportW w, "Main     2.000"
+    w = PtH(viewMain, c, 0#, 0.4125, X_GRV1, 0.4625, (xL + SX(viewMain, X_GRV1)) / 2, yA + 0.65, 1.75):  ReportW w, "Main     1.750"
+    w = PtH(viewMain, c, X_SHANK, 0.3125, 4#, 0.2, xL + 2.78, yA + 0.87, 0.875):                          ReportW w, "Main     .875"
+    w = PtH(viewMain, c, X_GRV1, -0.4625, X_GRV2, -0.4625, xL + 1.29, yA - 0.77, 0.094):                  ReportW w, "Main     .094 (groove)"
+    w = SkDiaWhy(viewMain, c, 1#, 0.4625, xL - 1.42, yA, False):                                          ReportW w, "Main     " & D & ".925"
+    If Len(w) = 0 Then Set d925 = lastDim
+    w = SkDiaWhy(viewMain, c, 2.5, 0.3125, xR + 0.67, yA + 0.47, False):                                  ReportW w, "Main     " & D & ".625"
+    w = SkDiaWhy(viewMain, c, (X_GRV1 + X_GRV2) / 2, 0.3875, xL - 0.7, yA, False):                         ReportW w, "Main     " & D & ".775 (groove bottom)"
+    w = SkDiaWhy(viewMain, c, 3.6, 0.2465, xR + 0.32, yA + 0.8, True):                                     ReportW w, "Main     (" & D & ".493) thread major"
     Set lastDim = d925
     DatumOnLastDim xL - 1.43, yA - 1.39
-    SkDia viewMain, skCandMain, (X_GRV1 + X_GRV2) / 2, 0.3875, xL - 0.7, yA, "Main     " & D & ".775 (groove bottom)", False, _
-          "Smart Dimension the groove's two bottom curves, place it left of the part next to " & D & ".925, add " & D & " if missing"
-    SkDia viewMain, skCandMain, 3.6, 0.2465, xR + 0.32, yA + 0.8, "Main     (" & D & ".493) thread major", True, _
-          "Smart Dimension the thread's top and bottom crest lines, place it right of the part above " & D & ".625, add " & D & " and tick Parentheses (3 decimals)"
+    NoteAt viewMain, Array(0.05, 0.44, 0#), Array(0#, 0.39, 0#), "2X .05 X 45<MOD-DEG>", xL - 1.45, yA + 0.81, "Main     2X .05 X 45" & ChrW(176)
+    NoteAt viewMain, Array(4#, -0.15, 0#), Array(3.98, -0.2, 0#), "1/2-13 UNC 2A", xR + 0.57, yA - 0.6, "Main     1/2-13 UNC 2A"
 End Sub
 
 ' horizontal dimension from pa to the right end (x = 4.000); the right end face is tried at several heights
@@ -1071,7 +1055,7 @@ Sub DatumOnLastDim(ByVal tx As Double, ByVal ty As Double)
     If dt Is Nothing Then                              ' last way: on the dia .925 surface's edge, below the part
         swModel.ClearSelection2 True
         swDraw.ActivateView viewMain.GetName2
-        If PickAt(viewMain, Array(X_GRV1, -0.45, 0#)) Then Set dt = swModel.InsertDatumTag2
+        If PickOnly(viewMain, Array(X_GRV1, -0.45, 0#), False) Then Set dt = swModel.InsertDatumTag2
         If Not dt Is Nothing Then Info "Datum A is attached to the " & ChrW(216) & ".925 groove edge (SolidWorks would not attach it to the dimension)"
     End If
     If Not dt Is Nothing Then
@@ -1206,7 +1190,7 @@ Sub MakeGtol(v As Object, p As Variant, ByVal sym As String, ByVal tol1 As Strin
     Dim g As Object, s As Variant, hasLeader As Boolean, n0 As Long, rb As String
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
-    hasLeader = PickAt(v, p)                           ' v4: a real edge at the outline, picked at that point
+    hasLeader = PickOnly(v, p, False)                  ' a real edge at the outline, one click at that point
     Set g = Nothing
     On Error Resume Next
     Set g = swModel.InsertGtol
@@ -1272,19 +1256,13 @@ Function SymInLibrary(ByVal sym As String) As Boolean
 End Function
 
 Sub DimDetail()
-    Dim dX As Double, dY As Double, D As String, w094 As String, w400 As String, p094 As String, p400 As String, cand As Integer
+    ' v6: exact sketch points / line / arc only (see DimMain)
+    Dim dX As Double, dY As Double, D As String, w As String, cand As Integer
     D = ChrW(216)
-    eKey = ""
-    CollectEdges viewDet
     dX = SX(viewDet, X_SHANK): dY = SY(viewDet, 0)
-    ' real edges first (v5), then exact sketch points
-    w094 = EdgeH(viewDet, Array(X_SHANK, 0.28, 0#), Array(X_NECK2, 0.15, 0#), dX - 0.52, dY + 1.106, 0.094)
-    w400 = EdgeDia(viewDet, X_SHANK - 0.01, X_NECK2 + 0.02, 0.4, dX + 1.95, dY, False)
     cand = FindCand(viewDet, X_SHANK + 0.075, 0.27, Array(X_SHANK, 0.28, 0#), 0.075, "DETAIL A")
-    If Len(w094) > 0 Then p094 = PtH(viewDet, cand, X_SHANK, 0.3125, X_NECK2, 0.2, dX - 0.52, dY + 1.106, 0.094)
-    If Len(w400) > 0 Then p400 = SkDiaWhy(viewDet, cand, X_SHANK + 0.07, 0.2, dX + 1.95, dY, False)
-    Report2 w094, p094, "Detail A .094 (neck)"
-    Report2 w400, p400, "Detail A " & D & ".400"
+    w = PtH(viewDet, cand, X_SHANK, 0.3125, X_NECK2, 0.2, dX - 0.52, dY + 1.106, 0.094):  ReportW w, "Detail A .094 (neck)"
+    w = SkDiaWhy(viewDet, cand, X_SHANK + 0.07, 0.2, dX + 1.95, dY, False):               ReportW w, "Detail A " & D & ".400"
     DetailSketchDims cand
 End Sub
 
@@ -1338,6 +1316,42 @@ Sub LeaderNoteI(v As Object, ByVal idx As Long, ByVal text As String, ByVal tx A
         Check True, label
     End If
 End Sub
+
+' a note with a leader to the edge at p1 (else p2), picked by a click at that exact point (no edge-table read)
+Sub NoteAt(v As Object, p1 As Variant, p2 As Variant, ByVal text As String, ByVal tx As Double, ByVal ty As Double, ByVal label As String)
+    Dim nt As Object, hasLeader As Boolean
+    hasLeader = PickOnly(v, p1, False)
+    If Not hasLeader Then hasLeader = PickOnly(v, p2, False)
+    Set nt = Nothing
+    On Error Resume Next
+    Set nt = swModel.InsertNote(text)
+    If Not nt Is Nothing Then nt.GetAnnotation.SetPosition2 tx * IN_M, ty * IN_M, 0#
+    On Error GoTo 0
+    swModel.ClearSelection2 True
+    If nt Is Nothing Then
+        Check False, label & "  - MISSING"
+    Else
+        Check True, label
+        If Not hasLeader Then ToDo label & ": the note is placed without a leader - click it and drag its leader handle to the part as on the reference"
+    End If
+End Sub
+
+' select the edge at part point p by one click at its exact sheet position (no edge-table read);
+' True when exactly one new item, in view v, is selected
+Function PickOnly(v As Object, p As Variant, ByVal append As Boolean) As Boolean
+    Dim s As Variant, n0 As Long
+    s = SheetPt(v, CDbl(p(0)), CDbl(p(1)), CDbl(p(2)))
+    If Not append Then                                 ' (activating a view can drop the current selection)
+        swModel.ClearSelection2 True
+        swDraw.ActivateView v.GetName2
+    End If
+    n0 = swModel.SelectionManager.GetSelectedObjectCount2(-1)
+    On Error Resume Next
+    swModel.Extension.SelectByID2 "", "EDGE", s(0) * IN_M, s(1) * IN_M, 0#, append, 0, Nothing, 0
+    On Error GoTo 0
+    KeepOneIn v, n0
+    PickOnly = (swModel.SelectionManager.GetSelectedObjectCount2(-1) = n0 + 1)
+End Function
 
 ' select the real edge at part point p in view v by picking at that point (so a leader lands there)
 Function PickAt(v As Object, p As Variant) As Boolean
@@ -1619,7 +1633,6 @@ End Function
 Function TestH(v As Object, it As Object, pEdge As Variant) As Double
     Dim dd As Object, n As Long, tx As Double, ty As Double
     TestH = -1
-    CollectEdges v
     tx = SX(v, CDbl(pEdge(0))): ty = SY(v, 0.9)
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
@@ -1628,7 +1641,9 @@ Function TestH(v As Object, it As Object, pEdge As Variant) As Double
     n = swModel.SelectionManager.GetSelectedObjectCount2(-1)
     On Error GoTo 0
     If n <> 1 Then swModel.ClearSelection2 True: Exit Function
-    If Not SelPt(v, pEdge, True) Then swModel.ClearSelection2 True: Exit Function
+    If Not PickOnly(v, pEdge, True) Then
+        If Not SelPt(v, pEdge, True) Then swModel.ClearSelection2 True: Exit Function   ' one edge-table read, if needed
+    End If
     If swModel.SelectionManager.GetSelectedObjectCount2(-1) <> 2 Then swModel.ClearSelection2 True: Exit Function
     Set dd = Nothing
     On Error Resume Next
@@ -1896,6 +1911,10 @@ Sub Report2(ByVal why1 As String, ByVal why2 As String, ByVal label As String)
     Else
         Check False, label & " - MISSING (edges: " & why1 & "; points: " & why2 & ")"
     End If
+End Sub
+
+Sub ReportW(ByVal why As String, ByVal label As String)
+    Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - MISSING (" & why & ")")
 End Sub
 
 ' =====================================================================================

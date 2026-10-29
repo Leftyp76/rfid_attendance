@@ -166,6 +166,7 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 17. **Modelled threads make a view slow**: turn its hidden lines on only at the end, skip helix edges at once, read each view's edges once, and never pick on the sheet over the thread.
 18. **Make every real-edge dimension in a view before adding any sketch item to it** (HW#8B v4 added test points first, and then the edge dimensions failed). Pick each edge two ways (edge table, then a click at its exact sheet position) and trim extra selections. Only then use exact sketch points as a value-checked fallback.
 19. **Rebuild a newly created view before reading its edges** (`ForceRebuild3`). A new DETAIL A reported no edges, so a correct detail was judged wrong and deleted.
+20. **On a heavy part (modelled threads) keep the number of SolidWorks operations small.** HW#8B v5 tried each dimension several ways and re-read the views' edges, and SolidWorks crashed after 20 minutes. Prove the sketch placement once per view, then dimension on exact sketch points, with single-click picks for leaders.
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)
