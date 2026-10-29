@@ -2,9 +2,11 @@
 '  HW#8A  -  IME 1140 Engineering Drawings II, In-Lab Assignment #8A  -  DRAWING macro
 '            (inches, sheet 1:1, third angle)
 '
-'  RUN THE ENGRAVE MACRO FIRST
-'   HW8A_Engrave_Logo_Macro.bas sets the logo to .003 deep (note 3) and saves the part.
-'   This drawing macro only checks that depth; it never changes or saves the part.
+'  THE LOGO (note 3: .003 deep)
+'   The Canvas part has it .005 deep. That is inside the title block's THREE PLACE DECIMAL
+'   tolerance (+-.008, note 2), so the part can stay as it is. This macro checks the depth
+'   against .003 +-.008; HW8A_Engrave_Logo_Macro.bas (optional) makes it exactly .003.
+'   This drawing macro never changes or saves the part.
 '
 '  HOW TO RUN
 '   1. Open "IME 1140 Engineering Drawings II In-Lab Assignment Part 1.SLDPRT" in SolidWorks.
@@ -32,6 +34,8 @@
 '   - SECTION A-A stays projected from the front view; the report checks both centres are level.
 '   - The dimensions above the section are stacked .24 in apart, with their text in one column.
 '
+'  v4: logo depth accepted anywhere in .003 +-.008 (the THREE PLACE DECIMAL tolerance);
+'      the engrave macro is optional
 '  v3: fixed "ByRef argument type mismatch" (CylSpan takes the face ByVal)
 '  v2: views forced to 1:1 (SolidWorks had auto-scaled them to 1:2); bolt circle and hole circles
 '      scale-aware; hole depths measured exactly from their edges, blind holes told apart by depth;
@@ -64,6 +68,7 @@ Const SHEET_DEN = 1#             ' sheet scale 1 : 1
 Const EMAX = 8000                ' edge table size (the engraved logo adds thousands of edges)
 Const PLACE_TOL = 0.001          ' views are placed to within .001 in
 Const DEG = 0.0174532925199433   ' radians per degree
+Const LOGO_TOL = 0.008           ' THREE PLACE DECIMAL tolerance from the title block (note 2)
 
 ' ---- sheet layout (sheet inches, measured from the reference: 108 px per inch) ----
 Const FRONT_X = 3.86             ' part centre in the front view
@@ -485,10 +490,13 @@ Sub CheckLogo()
     Next
     If cnt = 0 Then
         Check False, "No engraved logo found on the pocket floor - run HW8A_Engrave_Logo_Macro.bas first (note 3)"
-    ElseIf Abs(dMin - 0.003) < 0.0003 And Abs(dMax - 0.003) < 0.0003 Then
-        Check True, "Logo engraved .003 deep (" & cnt & " engraved faces) - note 3"
+    ElseIf dMin > 0.003 - LOGO_TOL - 0.00005 And dMax < 0.003 + LOGO_TOL + 0.00005 Then
+        ' note 3 asks .003 deep; the title block's THREE PLACE DECIMAL tolerance is +-.008 (note 2)
+        Check True, "Logo engraved " & Format(dMax, ".000") & " deep (" & cnt & " engraved faces) - within note 3's .003 " & _
+                    ChrW(177) & Mid(Format(LOGO_TOL, "0.000"), 2) & " (THREE PLACE DECIMAL tolerance in the title block)"
     Else
-        Check False, "Logo is engraved " & Format(dMax, ".0000") & " deep, note 3 asks .003 - run HW8A_Engrave_Logo_Macro.bas, then this macro again"
+        Check False, "Logo is engraved " & Format(dMax, ".000") & " deep - outside note 3's .003 " & ChrW(177) & _
+                     Mid(Format(LOGO_TOL, "0.000"), 2) & "; run HW8A_Engrave_Logo_Macro.bas, then this macro again"
     End If
 End Sub
 
