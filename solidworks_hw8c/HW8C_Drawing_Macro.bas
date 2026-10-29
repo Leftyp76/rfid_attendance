@@ -33,6 +33,9 @@
 '   - lean: one edge read per view, partial rebuilds, no per-step redraws, batch mode
 '   - OK / PROBLEM judged on read-back values; GD&T symbols looked up in your gtol.sym
 '
+'  v2: fixed VIEW A-A stopping the macro (a variable named sp hid the function SP); the real
+'      error is now shown if the macro stops; each big step (VIEW A-A, dimensions, DETAIL B ...)
+'      reports its own error and the rest of the drawing is still built
 '  v1: first version
 '
 '  SAFETY
@@ -104,7 +107,7 @@ Dim xMin As Double, xMax As Double, yMin As Double, yMax As Double
 
 Sub main()
     On Error GoTo Fail
-    Dim tmpl As String
+    Dim tmpl As String, eNum As Long, eDesc As String
     Set swApp = Application.SldWorks
     Set swMath = swApp.GetMathUtility
     report = "": problems = "": todoList = "": nOK = 0: nBad = 0: nTodo = 0
@@ -144,10 +147,11 @@ Sub main()
     Stage "Step 17 - save drawing and PDF":           SaveAll
     Exit Sub
 Fail:
+    eNum = Err.Number: eDesc = Err.Description          ' v2: before the clean-up below clears it
     NoDimDialog False
     SpeedMode False
     MsgBox "The macro stopped at: " & curStep & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description & vbCrLf & vbCrLf & _
+           "Error " & eNum & ": " & eDesc & vbCrLf & vbCrLf & _
            "Checks passed so far: " & nOK & vbCrLf & _
            IIf(nBad = 0, "", "Problems so far:" & vbCrLf & Left(problems, 500)), vbCritical, DRAW_NAME & " macro"
 End Sub
@@ -477,11 +481,12 @@ End Sub
 ' VIEW A-A: auxiliary view square to the round flange, from its outer face edge in the main view.
 ' If SolidWorks will not make it, an ordinary view turned to look square at the face (same picture).
 Function MakeAA() As Object
-    Dim av As Object, before As String, m As Integer, sp As Variant, how As String, n2 As Variant, ok As Boolean
+    On Error GoTo Oops
+    Dim av As Object, before As String, m As Integer, sPick As Variant, how As String, n2 As Variant, ok As Boolean
     Dim ax As Variant, ay As Variant, pk As Variant
     CollectEdges viewMain
     pk = PAlong(pRo, eRf, 1.3)                         ' on the outer face, between the bore and the chamfer
-    sp = SP(viewMain, pk)
+    sPick = SP(viewMain, pk)
     For m = 1 To 2
         before = ViewNames()
         swModel.ClearSelection2 True
@@ -490,15 +495,15 @@ Function MakeAA() As Object
             SelPt viewMain, pk, False
         Else
             On Error Resume Next
-            swModel.Extension.SelectByID2 "", "EDGE", sp(0) * IN_M, sp(1) * IN_M, 0#, False, 0, Nothing, 0
-            On Error GoTo 0
+            swModel.Extension.SelectByID2 "", "EDGE", sPick(0) * IN_M, sPick(1) * IN_M, 0#, False, 0, Nothing, 0
+            On Error GoTo Oops
         End If
         If swModel.SelectionManager.GetSelectedObjectCount2(-1) > 0 Then
             On Error Resume Next
             Set av = Nothing
             Set av = swDraw.CreateAuxiliaryViewAt2(AA_X * IN_M, AA_Y * IN_M, 0#, False)
             If av Is Nothing Then Err.Clear: Set av = swDraw.CreateAuxiliaryViewAt(AA_X * IN_M, AA_Y * IN_M, 0#, False)
-            On Error GoTo 0
+            On Error GoTo Oops
             If av Is Nothing Then Set av = NewViewSince(before)
             If Not av Is Nothing Then how = IIf(m = 1, "edge selected directly", "edge picked on the sheet"): Exit For
         End If
@@ -531,9 +536,16 @@ Function MakeAA() As Object
     PlaceView av, CDbl(pRo(0)), CDbl(pRo(1)), CDbl(pRo(2)), AA_X, AA_Y, True, True, "VIEW A-A placed (round flange centre)"
     Info "VIEW A-A label: SolidWorks names it by itself; if it does not read VIEW A-A, click the arrows and set the label to A"
     Set MakeAA = av
+    Exit Function
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Function
 
 Sub MakeIso()
+    On Error GoTo Oops
     Dim dv As Variant, upI As Variant, rtI As Variant, ok As Boolean
     dv = Unit(Add3(Add3(vR, vU), vF))
     upI = Unit(Sub3(vU, Scl(dv, Dot(vU, dv))))
@@ -548,10 +560,17 @@ Sub MakeIso()
     Check ok, "Isometric view scale 1:4 (reads " & ScaleTxt(viewIso) & ")"
     SetMode viewIso, DM_HIDDEN_REMOVED, "Isometric"
     PlaceView viewIso, CDbl(pRo(0)) / 2, CDbl(pRo(1)) / 2, 0#, ISO_X, ISO_Y, True, True, "Isometric view placed (half way between the flanges)"
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' DETAIL B (1:1) round the right view's lower-left hole, with its 4 X dia .375 THRU callout
 Sub MakeDetailB()
+    On Error GoTo Oops
     Dim cand As Integer, hp As Variant, c As Variant, rad As Double, seg As Object, dv As Object, before As String
     Dim combo As Integer, st As Integer, sh As Integer, i As Long, best As Long, tx As Double, ty As Double, why As String
     If viewRight Is Nothing Then Check False, "DETAIL B - no right view to take it from": Exit Sub
@@ -582,7 +601,7 @@ Sub MakeDetailB()
             Set dv = swDraw.CreateDetailViewAt4(DETB_X * IN_M, DETB_Y * IN_M, 0#, st, 1#, 1#, "B", sh, False, False, False, 5)
         End If
         Err.Clear
-        On Error GoTo 0
+        On Error GoTo Oops
         If dv Is Nothing Then Set dv = NewViewSince(before)
         If Not dv Is Nothing Then Exit For
     Next
@@ -616,10 +635,17 @@ Sub MakeDetailB()
     SelEdge viewDet, best, False
     why = TryDimSel("D", 1, c(0) + 1.6, c(1) - 0.68, 0.375, "4 X ", 3, " THRU", False, True)
     ReportW why, "Detail B 4 X " & ChrW(216) & ".375 THRU"
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' every view at its scale and where it was measured; the right view level with the main view
 Sub CheckScalesAndAlignment()
+    On Error GoTo Oops
     Dim a As Variant, b As Variant, ok As Boolean
     EnsureSheetScale
     a = SheetPt(viewMain, 0, 0, 0)
@@ -634,10 +660,17 @@ Sub CheckScalesAndAlignment()
         Check (Abs(b(0) - AA_X) < 0.01 And Abs(b(1) - AA_Y) < 0.01), "Alignment: VIEW A-A at " & Format(b(0), "0.000") & ", " & Format(b(1), "0.000") & _
               " (reference " & Format(AA_X, "0.000") & ", " & Format(AA_Y, "0.000") & ")"
     End If
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' centre marks: the right view's four holes and bore, VIEW A-A's five holes and bore
 Sub CentreMarks()
+    On Error GoTo Oops
     Dim n As Long, i As Long, k As Long, c As Variant, cm As Object, vv As Variant, v As Object, want As Long
     For Each vv In Array(viewRight, viewAA)
         Set v = Nothing
@@ -656,7 +689,7 @@ Sub CentreMarks()
                         Set cm = Nothing
                         On Error Resume Next
                         Set cm = swDraw.InsertCenterMark3(0, False, True)
-                        On Error GoTo 0
+                        On Error GoTo Oops
                         If Not cm Is Nothing Then n = n + 1
                     End If
                 End If
@@ -665,6 +698,12 @@ Sub CentreMarks()
             Check (n = want And n > 0), IIf(v Is viewRight, "Right", "VIEW A-A") & "  centre marks on " & n & " of " & want & " holes and bore"
         End If
     Next
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' +1 if a view's z points toward you (proved on the main view, where vF faces you), else -1
@@ -966,6 +1005,7 @@ End Sub
 '  Dimensions and GD&T  (text positions measured on the reference, sheet inches)
 ' =====================================================================================
 Sub DimMain()
+    On Error GoTo Oops
     Dim o As Variant, ro As Variant, yb As Double, why As String, D As String, i As Long, cand As Integer
     Dim pOut As Variant, pIn As Variant, s As Variant, e As Variant, c As Variant, sS As Variant, sE As Variant, sC As Variant
     Dim arc As Object, dirn As Integer, x As Double
@@ -1029,12 +1069,18 @@ Sub DimMain()
         swDraw.ActivateView viewMain.GetName2
         On Error Resume Next
         arc.Select4 False, Nothing
-        On Error GoTo 0
+        On Error GoTo Oops
         why = TryDimSel("R", 1, o(0) - 0.361, o(1) + 2.013, rBend, "", 3, "", True, True)
         CentreStyle arc
     End If
     If Len(why) > 0 Then DeleteSeg arc
     ReportW why, "Main     (R" & Format(rBend, "0.000") & ") bend, on the pipe's centre line"
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' point at distance r from c (both part inches, in the main view's plane), toward p
@@ -1046,6 +1092,7 @@ Function OnCircle(c As Variant, p As Variant, ByVal r As Double) As Variant
 End Function
 
 Sub DimRight()
+    On Error GoTo Oops
     Dim rc As Variant
     If viewRight Is Nothing Then Exit Sub
     eKey = ""
@@ -1056,9 +1103,16 @@ Sub DimRight()
     DimT viewRight, "H", Array(0#, -1.125, 0#), Array(0#, -1.8125, -1.125), rc(0) - 0.27, rc(1) - 1.272, 1.125, "", 3, "", False, 0, 0, 0, 3, "Right    1.125"
     DimT viewRight, "V", Array(0#, 1.625, 1.3125), Array(0#, -1.625, 1.3125), rc(0) - 1.86, rc(1) + 0.025, 3.25, "", 3, "", False, TOL_SYM, -0.004, 0.004, 3, "Right    3.250" & ChrW(177) & ".004"
     DimT viewRight, "V", Array(0#, 1.625, 1.3125), Array(0#, 1.125, 0#), rc(0) - 1.2, rc(1) + 0.35, 1.625, "", 3, "", False, 0, 0, 0, 3, "Right    1.625"
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 Sub DimAA()
+    On Error GoTo Oops
     Dim ac As Variant, why As String, D As String, k As Long, kA As Long, kB As Long, a As Double, bestA As Double, bestB As Double
     Dim hp As Variant, hs As Variant, cand As Integer, seg As Object, l1 As Object, l2 As Object, angs(4) As Double
     Dim dimHole As Object, dimBore As Object, sc As Double, p1 As Variant, p2 As Variant
@@ -1117,7 +1171,7 @@ Sub DimAA()
         swDraw.ActivateView viewAA.GetName2
         On Error Resume Next
         seg.Select4 False, Nothing
-        On Error GoTo 0
+        On Error GoTo Oops
         why = TryDimSel("D", 1, ac(0) + 2.13, ac(1) + 1.144, 3.15, "", 3, "", False, True)
         If Len(why) = 0 Then why = SetTol(lastDim, TOL_BASIC, 0, 0, 3, 3)
         If Len(why) > 0 And InStr(why, "WRONG") > 0 Then DeleteSeg seg
@@ -1134,12 +1188,18 @@ Sub DimAA()
         On Error Resume Next
         l1.Select4 False, Nothing
         l2.Select4 True, Nothing
-        On Error GoTo 0
+        On Error GoTo Oops
         why = TryDimSel("A", 2, ac(0) - 0.964, ac(1) + 1.572, 72#, "5 X ", 0, "", False, True)
         If Len(why) = 0 Then why = SetTol(lastDim, TOL_BASIC, 0, 0, 0, 0)
     End If
     If Len(why) > 0 Then DeleteSeg l1: DeleteSeg l2
     ReportW why, "VIEW A-A 5 X 72" & ChrW(176) & " BASIC (boxed)"
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' point at distance d from c, toward p (part inches)
@@ -1835,6 +1895,7 @@ End Sub
 
 ' NOTES block, top left: each number and each text is its own note so the columns line up exactly
 Sub AddNotes()
+    On Error GoTo Oops
     Dim lines As Variant, i As Long, y As Double, ok As Boolean
     lines = Array("USE THE IN-LAB ASSIGNMENT #8C PART MODEL ON CANVAS TO RE-CREATE THE ENGINEERING DRAWING", _
                   "MAKE SURE YOUR DRAWING'S TOLERANCES MATCH THE DRAWING TOLERANCES SHOWN BELOW.")
@@ -1845,6 +1906,12 @@ Sub AddNotes()
         ok = PlaceNote(CStr(lines(i)), NOTE_X + NOTE_TAB, y) And ok
     Next
     Check ok, "NOTES 1-2 top left (each read back)"
+    Exit Sub
+Oops:
+    Check False, curStep & " - stopped by error " & Err.Number & ": " & Err.Description & " (the rest of the drawing carries on)"
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
 End Sub
 
 ' =====================================================================================

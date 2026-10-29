@@ -32,7 +32,8 @@ def main():
     called = set(re.findall(r'(?:^|[\s:(=,])([A-Z][A-Za-z0-9]+)(?=[\s(]|$)', code, flags=re.M))
     consts = set(re.findall(r'^Const (\w+)', t, flags=re.M))
     declared = set(m.group(1) for m in re.finditer(r'\b(\w+)\s*(?:\([^)]*\))?\s+As\b', code))
-    unk = sorted(c for c in called if c not in KW and c not in defined and c not in consts and c not in declared and not c.startswith('vb'))
+    labels = set(re.findall(r'^(\w+):\s*$', code, flags=re.M))      # line labels (On Error GoTo Oops ... Oops:)
+    unk = sorted(c for c in called if c not in KW and c not in defined and c not in consts and c not in declared and c not in labels and not c.startswith('vb'))
     if unk: ok = False; print('UNRESOLVED names (typo or missing helper?):', unk)
     for b in BUILTINS:
         if re.search(r'\b' + b + r'\s+As\b', code, flags=re.I) and not re.search(r'Function ' + b + r'\(', code):
@@ -52,6 +53,18 @@ def main():
             mv = re.match(r'\s*(\w+)', part)
             if mv: modvars.add(mv.group(1).lower())
     clash = sorted(n for n in set(defined) if n.lower() in modvars)
+    # a local variable or parameter named like a procedure (VBA ignores case): inside that procedure
+    # the name means the variable, so a call to the procedure silently indexes the variable instead
+    procnames = {n.lower(): n for n in defined}
+    for m in re.finditer(r'^(?:Sub|Function) (\w+)\((.*?)\)[^\n]*\n(.*?)^End (?:Sub|Function)', re.sub(r' _\n\s*', ' ', code), flags=re.M | re.S):
+        names = set(re.findall(r'(?:^|,)\s*(?:Optional\s+)?(?:ByVal\s+|ByRef\s+)?(\w+)', m.group(2)))
+        for dm in re.finditer(r'^\s*Dim\s+(.*)$', m.group(3), flags=re.M):
+            names |= set(re.findall(r'(?:^|,)\s*(\w+)', dm.group(1)))
+        for nm in names:
+            pn = procnames.get(nm.lower())
+            if pn and nm != m.group(1) and re.search(r'(?<![\w.])' + pn + r'\s*\(', m.group(3)):
+                ok = False
+                print(f'SHADOWS procedure: in {m.group(1)}, the variable "{nm}" hides {pn}() which it calls (VBA ignores case) - rename the variable')
     if clash: ok = False; print('AMBIGUOUS name (module variable and procedure share it, case-insensitive):', clash)
     print(f'{len(t.splitlines())} lines, {len(defined)} procedures -> ' + ('OK' if ok else 'FIX THE ITEMS ABOVE'))
 

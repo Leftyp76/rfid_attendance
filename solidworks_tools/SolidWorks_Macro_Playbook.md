@@ -171,6 +171,8 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 21. **Sketch points show as small x's that can't be clicked or hidden easily** (HW#8B). Prefer sketch lines, arcs and circles (they belong on the drawing anyway). Use points only where nothing else will do.
 22. **A view's "toward you" sign**: prove it on a view whose facing direction is known (`ZSign` on the main view) before judging which side an auxiliary view looks from.
 23. **BASIC dimensions** are tolerance type 1 (`swTolBASIC`), set and read back like any tolerance. A position frame's Ø comes from the `Dia1` argument of `SetFrameSymbols2`. Codes: position `<IGTOL-POSI>`, angularity `<IGTOL-ANGULAR>`.
+24. **A local variable named like a procedure hides it** (HW#8C v1: `sp = SP(...)` indexed the empty variable, because VBA ignores case). `vba_static_check.py` now flags this.
+25. **Capture `Err.Number` and `Err.Description` first in an error handler.** Clean-up calls that use `On Error Resume Next` / `Err.Clear` wipe them, and HW#8C v1 showed "Error 0". Give each big step its own handler so one failure doesn't stop the whole drawing.
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)
