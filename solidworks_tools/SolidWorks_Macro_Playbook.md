@@ -11,9 +11,10 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 | `solidworks_hw7b/` | Drawing with **section view** B-B | Section views |
 | `solidworks_hw7c/` | Drawing with **auxiliary view** D-D at 1:2 | Auxiliary views, other scales |
 | `solidworks_hw7d/` | Drawing with **detail view** E at 2:1, turned part | Detail views, revolved parts |
+| `solidworks_hw8a/` | Drawing with **SECTION A-A**, hole callouts, toleranced dims (±, limit, bilateral), datum and parallelism frame, 1:3 shaded iso; plus a part macro that changes an engraving depth | Section views, tolerances, GD&T, hole callouts |
 | `solidworks_tools/` | `sw_extract.py` reads a SolidWorks file, `vba_static_check.py` checks a macro | Every job |
 
-**Start every new drawing macro from the newest working drawing macro** (`HW7C_Drawing_Macro.bas`, or `HW7D` for detail views). Keep its proven helpers unchanged and replace only the part-specific procedures.
+**Start every new drawing macro from the newest working drawing macro** (`HW8A_Drawing_Macro.bas` v4; `HW7D` for detail views). Read section 4.8 first: it lists the mistakes HW#8A v1–v4 made, and the new macro must not repeat them. Keep its proven helpers unchanged and replace only the part-specific procedures.
 
 ---
 
@@ -30,7 +31,7 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 9. **Iterate on the report.** Every run ends with a check summary listing OK, WRONG or MISSING items, and writes `HWxx_checks.txt`. The user sends a screenshot of the summary plus the whole sheet. Fix the root cause shown, never guess at several things at once.
 10. **Commit and push** each version with a version note in the macro header (`v2: ...`).
 
-**Standing user answers so far:** today's date, written in the same format as the reference (e.g. `10-22-2026` or `10-22-26`). Sheet "x OF y" copied from the reference. No instructor NOTES line. The logo comes from the template. Units are inches (IPS) for drawings and MMGS when the part drawing says so.
+**Standing user answers so far:** today's date, written in the same format as the reference (e.g. `10-22-2026` or `10-22-26`). Sheet "x OF y" copied from the reference. No instructor NOTES line (and no balloon that only points to a note). The logo comes from the template. A depth in a note (e.g. an engraving ".003 DEEP") is judged against the title block's general tolerance (HW#8A: .005 accepted as .003 ±.008), so don't make the user change the part for it. Units are inches (IPS) for drawings and MMGS when the part drawing says so.
 
 ---
 
@@ -141,6 +142,21 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 
 ---
 
+### 4.8 Lessons from HW#8A (errors to never repeat)
+
+These are the problems found in HW#8A runs. Each lists what went wrong and what to do instead.
+
+1. **A check reported a problem that wasn't there (the error the user flagged in v4).** `Gtol.SetFrameSymbols2` / `SetFrameSymbols3` returned failure in SOLIDWORKS 2026 although the // symbol was drawn. The summary said "symbol did not take" for a correct frame. **Never decide OK/PROBLEM from an API call's return value alone.** Read the result back (e.g. `GetFrameSymbols` / the frame's text, a dimension's value, a view's scale) and judge on that. If nothing can be read back, report it as `Info` ("look that // shows"), not as a PROBLEM. (In SW 2022+ these Gtol calls are documented as valid only for older Gtols.)
+2. **Temporary dimensions were left on the sheet.** Test dimensions used to prove a sketched line or circle's position ("1.94" twice, above the front view) were not removed by `dd.GetAnnotation.Select3` + `EditDelete`. Count the view's display dimensions before and after and confirm the deletion, or delete by name (`SelectByID2 dd.GetNameForSelection, "DIMENSION"`). Better still, prove a sketch position without creating a dimension, e.g. from the segment's sketch points transformed to the sheet.
+3. **SolidWorks auto-scaled new views to 1:2** although the sheet properties read 1:1. The template's sheet format is stored at 1:2, and the status bar still showed 1 : 2. After creating every view, set and read back its scale (`SetViewScale`: `ScaleRatio`, then `ScaleDecimal`). Also read the sheet scale back after a rebuild and set it again if it changed. Anything given in sheet inches must use the view scale: sketch radii, and edge-table radii `eR` (sheet size = model size × scale).
+4. **The section label stayed** ("SECTION A-A" plus "SCALE 1 : 1", the scale line appearing because the view scale differed from the sheet's), overlapping the title block. Setting `Annotation.Visible` did not hide it. Keep the sheet scale equal to the view scales so no scale line appears, place the label clear of the title block, and list "right-click the label > Hide" under things for the user, not as a silent OK.
+5. **Tolerance values silently stayed 0** (±.000, .080/.080). `tol.Type` stuck but `SetValues2(min, max, 2, Empty)` changed nothing. Try `SetValues2(min, max, 1, "")`, `SetValues2(..., 2, "")`, `SetValues(min, max)` in turn, and read back `GetMaxValue` / `GetMinValue` after each.
+6. **Wrong symbol codes** render as literal text or a blank cell. Correct codes: counterbore `<HOLE-SPOT>`, countersink `<HOLE-SINK>`, depth `<HOLE-DEPTH>`, diameter `<MOD-DIAM>`, ± `<MOD-PM>`, degree `<MOD-DEG>`, parallelism `<IGTOL-PARA>` (the gtol codes are 4-letter: `<IGTOL-POSI>`, `<IGTOL-CONC>`). `<HOLE-CBORE>`, `<HOLE-CSINK>` and `<IGTOL-PARALLEL>` do not exist.
+7. **Compile error "ByRef argument type mismatch"**: `CylSpan(faces(i))` passed a Variant array element to `fc As Object`. Declare such parameters `ByVal`. `vba_static_check.py` now flags this.
+8. **Hole recognition**: blind-hole depths in Hole Wizard may run to the drill tip, so a depth window like .35 ± .03 failed. Measure a bore's length from the centres of its circular edges (not `GetBox`). Tell blind holes apart by relative depth (shallower vs deeper), and list every hole's measurements as `Info` lines in the check file.
+9. **Circular-group centre marks** (`InsertCenterMark3(2, ...)`) gave plain + marks, not the reference's marks turned toward the centre. Still unsolved.
+10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
+
 ## 5. Things that need the user (say so up front)
 
 - **Pick and run:** run `main` from the Macros dialog, never a helper. If several parts are open, close the others or click into the right part window.
@@ -163,13 +179,17 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 - [ ] Centrelines come last, and `ClearCommand` runs before each view's dimensions
 - [ ] The title block ends with `EditSheet`, and `FinishSheet` runs before the PDF
 - [ ] View variables are reset in `main`
+- [ ] Every OK/PROBLEM is judged on a value read back from SolidWorks, never on an API call's return value alone (4.8 #1)
+- [ ] No temporary dimension or sketch item is left on the sheet: deletions are confirmed (4.8 #2)
+- [ ] Every view's scale and the sheet scale are read back and match the reference; section labels show no extra "SCALE" line (4.8 #3, #4)
+- [ ] Tolerance values are read back; symbol codes come from 4.8 #6
 - [ ] `vba_static_check.py` prints OK
 
 ---
 
 ## 7. Starter prompt for a new chat
 
-> I'm doing IME 1140 SolidWorks assignments. Read `solidworks_tools/SolidWorks_Macro_Playbook.md` in the repo `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`, first. If you can't reach the repo, use the copy I attached. Follow it exactly: its workflow, VBA rules, part- and drawing-macro techniques and pre-flight checklist. Base the new macro on the newest working macro in that branch (`solidworks_hw7c/HW7C_Drawing_Macro.bas`, or `solidworks_hw7d/HW7D_Drawing_Macro.bas` for detail views, or `solidworks_hw4c/HW4C_SolidWorks_Macro.bas` for a part), keeping its proven helpers unchanged.
+> I'm doing IME 1140 SolidWorks assignments. Read `solidworks_tools/SolidWorks_Macro_Playbook.md` in the repo `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`, first. If you can't reach the repo, use the copy I attached. Follow it exactly: its workflow, VBA rules, part- and drawing-macro techniques and pre-flight checklist. Base the new macro on the newest working macro in that branch (`solidworks_hw8a/HW8A_Drawing_Macro.bas`, or `solidworks_hw7d/HW7D_Drawing_Macro.bas` for detail views, or `solidworks_hw4c/HW4C_SolidWorks_Macro.bas` for a part), keeping its proven helpers unchanged, and avoid every error listed in section 4.8.
 >
 > This assignment: [paste the assignment text and attach the reference image, the .SLDPRT and Hayden_p_ansi.drwdot]. File name rule: [e.g. HW#8A + Last Name]. My last name is Perhach.
 >
