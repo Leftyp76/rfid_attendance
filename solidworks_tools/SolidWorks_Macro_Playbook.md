@@ -13,6 +13,7 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 | `solidworks_hw7d/` | Drawing with **detail view** E at 2:1, turned part | Detail views, revolved parts |
 | `solidworks_hw8a/` | Drawing with **SECTION A-A**, hole callouts, toleranced dims (±, limit, bilateral), datum and parallelism frame, 1:3 shaded iso; plus a part macro that changes an engraving depth | Section views, tolerances, GD&T, hole callouts |
 | `solidworks_hw8b/` | Turned part with **DETAIL A 3:1**, left end view, NOTES block, circularity / runout frames, datum on a dimension; hand steps listed as TO DO | Turned parts, detail views, notes |
+| `solidworks_hw8c/` | Elbow casting: **VIEW A-A auxiliary** view square to an angled flange, BASIC (boxed) dims, position / angularity frames, datums on a face and on a dimension, DETAIL B 1:1, iso 1:4 | Auxiliary views, GD&T, basic dimensions |
 | `solidworks_tools/` | `sw_extract.py` reads a SolidWorks file, `vba_static_check.py` checks a macro | Every job |
 
 **Start every new drawing macro from the newest working drawing macro** (`HW8A_Drawing_Macro.bas` v4; `HW7D` for detail views). Read section 4.8 first: it lists the mistakes HW#8A v1–v4 made, and the new macro must not repeat them. Keep its proven helpers unchanged and replace only the part-specific procedures.
@@ -167,6 +168,9 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 18. **Make every real-edge dimension in a view before adding any sketch item to it** (HW#8B v4 added test points first, and then the edge dimensions failed). Pick each edge two ways (edge table, then a click at its exact sheet position) and trim extra selections. Only then use exact sketch points as a value-checked fallback.
 19. **Rebuild a newly created view before reading its edges** (`ForceRebuild3`). A new DETAIL A reported no edges, so a correct detail was judged wrong and deleted.
 20. **On a heavy part (modelled threads) keep the number of SolidWorks operations small.** HW#8B v5 tried each dimension several ways and re-read the views' edges, and SolidWorks crashed after 20 minutes. Prove the sketch placement once per view, then dimension on exact sketch points, with single-click picks for leaders.
+21. **Sketch points show as small x's that can't be clicked or hidden easily** (HW#8B). Prefer sketch lines, arcs and circles (they belong on the drawing anyway). Use points only where nothing else will do.
+22. **A view's "toward you" sign**: prove it on a view whose facing direction is known (`ZSign` on the main view) before judging which side an auxiliary view looks from.
+23. **BASIC dimensions** are tolerance type 1 (`swTolBASIC`), set and read back like any tolerance. A position frame's Ø comes from the `Dia1` argument of `SetFrameSymbols2`. Codes: position `<IGTOL-POSI>`, angularity `<IGTOL-ANGULAR>`.
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)
