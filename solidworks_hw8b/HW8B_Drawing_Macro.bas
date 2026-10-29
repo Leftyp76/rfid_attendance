@@ -32,6 +32,8 @@
 '     scale is read back; tolerance block read back; symbol codes from the playbook
 '   - things a macro cannot pick are listed as TO DO BY HAND with exact steps
 '
+'  v3: the right end and the thread note use only the edge table (v2 fished on the thread: slow);
+'      SolidWorks' own tapped-hole callout and centre mark are reused, not doubled
 '  v2: much faster on the modelled threads: the main view's hidden lines are turned on only at
 '      the end, thread helix edges are skipped at once, each view's edges are read once;
 '      the current step shows in the SolidWorks status bar
@@ -918,10 +920,8 @@ Sub DimMain()
     ' diameters, from the side-on circle edges of that size
     DiaByLen viewMain, 0#, X_COLLAR, 0.925, xL - 1.42, yA, D & ".925", 3, False
     DatumOnLastDim xL - 1.43, yA - 1.39
-    why = TryDim(viewMain, "V", Array((X_GRV1 + X_GRV2) / 2, 0.3875, 0#), Array((X_GRV1 + X_GRV2) / 2, -0.3875, 0#), xL - 0.7, yA, 0.775, "<MOD-DIAM>", 3, "", False, True)
-    If Len(why) = 0 Then
-        Check True, "Main     " & D & ".775 (groove bottom)"
-    Else
+    ' outline curves (silhouettes) can never be picked by a macro: no slow attempts, straight to the list
+    If True Then
         ToDo "Main " & D & ".775: the groove bottom is an outline curve a macro cannot pick. Smart Dimension: click the groove's top bottom-curve, then its lower one, place it left of the part next to " & D & ".925 (" & D & " is added automatically for a diameter; if not, add it)"
     End If
     DiaByLen viewMain, X_COLLAR - 0.01, X_SHANK + 0.01, 0.625, xR + 0.67, yA + 0.47, D & ".625", 3, False
@@ -930,19 +930,43 @@ Sub DimMain()
 
     ' notes with leaders
     LeaderNote2 viewMain, Array(0.05, 0.44, 0#), Array(0#, 0.39, 0#), "2X .05 X 45<MOD-DEG>", xL - 1.45, yA + 0.81, "Main     2X .05 X 45" & ChrW(176)
-    LeaderNote2 viewMain, Array(4#, -0.15, 0#), Array(4#, 0.15, 0#), "1/2-13 UNC 2A", xR + 0.57, yA - 0.6, "Main     1/2-13 UNC 2A"
+    ThreadNote xR + 0.57, yA - 0.6
 End Sub
 
 ' horizontal dimension from pa to the right end (x = 4.000); the right end face is tried at several heights
 ' (the modelled thread can break its edge into pieces)
 Sub DimToEnd(v As Object, pa As Variant, ByVal tx As Double, ByVal ty As Double, ByVal expect As Double, ByVal label As String)
-    Dim pb As Variant, why As String
-    For Each pb In Array(Array(4#, 0.08, 0#), Array(4#, -0.08, 0#), Array(4#, 0.15, 0#), Array(4#, -0.15, 0#), Array(4#, 0.03, 0#))
-        why = TryDim(v, "H", pa, pb, tx, ty, expect, "", 3, "", False, True)
-        If Len(why) = 0 Then Exit For
-    Next
+    ' v3: the right end is taken only from the edge table. v2 picked on the sheet at 5 points, and on the
+    ' modelled thread each pick grabbed a helix edge (wrong value, delete, retry) - slow, looked stuck.
+    Dim i As Long, why As String
+    i = EndLine(v)
+    If i < 0 Then
+        ToDo label & ": the thread leaves no straight edge at the right end for a macro. Smart Dimension from the left end line to the right end (click the end of the thread), place it as on the reference (3 decimals)"
+        Exit Sub
+    End If
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    SelPt v, pa, False
+    SelEdge v, i, True
+    why = TryDimSel("H", 2, tx, ty, expect, "", 3, "", False, True)
     Check (Len(why) = 0), label & IIf(Len(why) = 0, "", "  - " & why)
 End Sub
+
+' the right end face (x = 4.000): the longest vertical edge line there in the edge table, -1 if none
+Function EndLine(v As Object) As Long
+    Dim i As Long, x As Double, bl As Double, L As Double
+    EndLine = -1
+    CollectEdges v
+    x = SX(v, 4#)
+    For i = 0 To eN - 1
+        If eKind(i) = "L" Then
+            If Abs(eX2(i) - eX1(i)) < 0.003 And Abs((eX1(i) + eX2(i)) / 2 - x) < 0.006 Then
+                L = Abs(eY2(i) - eY1(i))
+                If L > bl And L > 0.02 Then bl = L: EndLine = i
+            End If
+        End If
+    Next
+End Function
 
 ' diameter from a side-on circle edge of exactly that size between axial positions x1 and x2
 Sub DiaByLen(v As Object, ByVal x1 As Double, ByVal x2 As Double, ByVal dia As Double, ByVal tx As Double, ByVal ty As Double, _
@@ -1000,6 +1024,27 @@ Function DatumLabel(dt As Object) As String
     DatumLabel = dt.GetLabel
 End Function
 
+' 1/2-13 UNC 2A: leader to the thread's end edge from the edge table (no picking on the thread)
+Sub ThreadNote(ByVal tx As Double, ByVal ty As Double)
+    Dim i As Long, nt As Object
+    i = EndLine(viewMain)
+    swModel.ClearSelection2 True
+    swDraw.ActivateView viewMain.GetName2
+    If i >= 0 Then SelEdge viewMain, i, False
+    Set nt = Nothing
+    On Error Resume Next
+    Set nt = swModel.InsertNote("1/2-13 UNC 2A")
+    If Not nt Is Nothing Then nt.GetAnnotation.SetPosition2 tx * IN_M, ty * IN_M, 0#
+    On Error GoTo 0
+    swModel.ClearSelection2 True
+    If nt Is Nothing Then
+        Check False, "Main     1/2-13 UNC 2A note - MISSING"
+    Else
+        Check True, "Main     1/2-13 UNC 2A note"
+        If i < 0 Then ToDo "Main 1/2-13 UNC 2A: the note is placed but has no leader (no straight edge on the thread). Click the note, drag its leader handle to the thread's lower edge"
+    End If
+End Sub
+
 ' left end view: the tapped-hole callout
 Sub DimLeft()
     Dim i As Long, best As Long, bestR As Double, c As Variant, xL As Double, yA As Double
@@ -1013,14 +1058,50 @@ Sub DimLeft()
         End If
     Next
     xL = SX(viewMain, 0): yA = SY(viewMain, 0)
+    If AutoHoleCallout(xL - 2.24, yA + 1.09) Then Exit Sub
     LeaderNoteI viewLeft, best, "5/16-18 UNC <HOLE-DEPTH> .750", xL - 2.24, yA + 1.09, "Left     5/16-18 UNC " & ChrW(&H21A7) & " .750 on the tapped hole" & _
                 IIf(best >= 0, " (hole edge " & ChrW(216) & Format(2 * bestR / ViewSc(viewLeft), ".000") & ")", "")
 End Sub
 
+' SolidWorks may add a "5/16-18 Tapped Hole" callout to the left view by itself. If so, change its
+' text to the reference's and move it (read back); if it will not change, hide it and add ours.
+Function AutoHoleCallout(ByVal tx As Double, ByVal ty As Double) As Boolean
+    Dim anns As Variant, i As Long, t As String, sa As Object, want As String, orig As Long
+    want = "5/16-18 UNC <HOLE-DEPTH> .750"
+    On Error Resume Next
+    anns = Empty
+    anns = viewLeft.GetAnnotations
+    If Not IsArray(anns) Then Exit Function
+    For i = LBound(anns) To UBound(anns)
+        Set sa = Nothing
+        Set sa = anns(i).GetSpecificAnnotation
+        t = "": t = UCase(sa.GetText)
+        If InStr(t, "TAPPED HOLE") > 0 Or (InStr(t, "5/16-18") > 0 And InStr(t, ".750") = 0) Then
+            sa.SetText want
+            t = "": t = UCase(sa.GetText)
+            If InStr(t, ".750") > 0 Then
+                anns(i).SetPosition2 tx * IN_M, ty * IN_M, 0#
+                Check True, "Left     SolidWorks' own tapped-hole callout changed to 5/16-18 UNC " & ChrW(&H21A7) & " .750 (reads back)"
+                AutoHoleCallout = True
+            Else
+                orig = anns(i).Visible
+                anns(i).Visible = IIf(orig = 1, 0, 1)
+                Info "SolidWorks' own callout """ & t & """ would not change text; it was hidden (state " & orig & " -> " & anns(i).Visible & "), ours is added. If both show, delete theirs"
+            End If
+            Exit Function
+        End If
+    Next
+End Function
+
 ' centre mark (with extended lines) on the left end view's outer circle
 Sub LeftCentreMark()
-    Dim i As Long, best As Long, bestR As Double, c As Variant, cm As Object
+    Dim i As Long, best As Long, bestR As Double, c As Variant, cm As Object, n As Long
     If viewLeft Is Nothing Then Exit Sub
+    n = -1
+    On Error Resume Next
+    n = viewLeft.GetCenterMarkCount
+    On Error GoTo 0
+    If n > 0 Then Check True, "Left     centre mark already there (SolidWorks added it) - no second one": Exit Sub
     CollectEdges viewLeft
     c = SheetPt(viewLeft, 0, 0, 0)
     best = -1: bestR = 0
@@ -1057,8 +1138,7 @@ Sub MakeGtol(v As Object, p As Variant, ByVal sym As String, ByVal tol1 As Strin
     Dim g As Object, s As Variant, hasLeader As Boolean, n0 As Long, rb As String
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
-    CollectEdges v
-    hasLeader = SelPt(v, p, False)                     ' table edge, else EDGE / SILHOUETTE pick at that point
+    hasLeader = False                                  ' the leader goes to an outline, which a macro cannot pick
     Set g = Nothing
     On Error Resume Next
     Set g = swModel.InsertGtol
@@ -1129,17 +1209,11 @@ Sub DimDetail()
     CollectEdges viewDet
     dX = SX(viewDet, X_SHANK): dY = SY(viewDet, 0)
     MakeDimP viewDet, "H", Array(X_SHANK, 0.28, 0#), Array(X_NECK2, 0.15, 0#), dX - 0.52, dY + 1.106, 0.094, "Detail A .094 (neck)", "", 3
-    why = TryDim(viewDet, "A", Array(X_SHANK, 0.28, 0#), Array(X_NECK2 + 0.0134, 0.2232, 0#), dX + 0.42, dY + 1.48, 30#, "", 0, "", False, True)
-    If Len(why) = 0 Then
-        Check True, "Detail A 30" & ChrW(176)
-    Else
+    If True Then                                       ' the chamfer is an outline line: by hand
         ToDo "Detail A 30" & ChrW(176) & ": the chamfer is an outline line a macro cannot pick. Smart Dimension: click the shank's end face line, then the slanted chamfer line at the thread start; place it above (30" & ChrW(176) & ")"
     End If
     DiaByLen viewDet, X_SHANK, X_NECK2 + 0.01, 0.4, dX + 1.95, dY, D & ".400", 3, False
-    why = TryDim(viewDet, "R", Array(X_SHANK + 0.0138, -0.2138, 0#), Empty, dX + 1.14, dY - 1.12, 0.047, "3 X ", 3, "", False, True)
-    If Len(why) = 0 Then
-        Check True, "Detail A 3 X R.047"
-    Else
+    If True Then                                       ' the fillet is an outline curve: by hand
         ToDo "Detail A 3 X R.047: the fillet is an outline curve a macro cannot pick. Smart Dimension on the lower fillet curve at the neck, place it lower right, then type ""3 X "" in front of R.047 (3 decimals)"
     End If
 End Sub
