@@ -32,6 +32,20 @@ def main():
     called = set(re.findall(r'(?:^|[\s:(=,])([A-Z][A-Za-z0-9]+)(?=[\s(]|$)', code, flags=re.M))
     consts = set(re.findall(r'^Const (\w+)', t, flags=re.M))
     declared = set(m.group(1) for m in re.finditer(r'\b(\w+)\s*(?:\([^)]*\))?\s+As\b', code))
+    # a variable / parameter named like a VBA reserved word (case-insensitive): "Syntax error"
+    RESERVED = set('''and as boolean byref byte byval call case const currency date declare dim do double each else elseif
+empty end endif enum eqv erase error event exit false for friend function get global gosub goto if imp implements in integer
+is let lib like long loop lset me mod new next not nothing null on optional or paramarray preserve private property public
+raiseevent redim rem resume return rset select set single static step stop string sub then to true type typeof until variant
+wend while with withevents xor attribute'''.split())
+    for m in re.finditer(r'\b(?:Dim|Private|Public|Static|ByVal|ByRef|Optional)\s+(.*)', code):
+        for nm in re.findall(r'(?:^|,)\s*(?:Optional\s+)?(?:ByVal\s+|ByRef\s+)?(\w+)', m.group(1)):
+            if nm.lower() in RESERVED:
+                ok = False; print(f'RESERVED word used as a name: "{nm}" (VBA reads it as {nm.lower()}) - rename it')
+    for m in re.finditer(r'^(?:Sub|Function) \w+\((.*?)\)', re.sub(r' _\n\s*', ' ', code), flags=re.M):
+        for nm in re.findall(r'(?:^|,)\s*(?:Optional\s+)?(?:ByVal\s+|ByRef\s+)?(\w+)', m.group(1)):
+            if nm.lower() in RESERVED:
+                ok = False; print(f'RESERVED word used as a parameter name: "{nm}" - rename it')
     labels = set(re.findall(r'^(\w+):\s*$', code, flags=re.M))      # line labels (On Error GoTo Oops ... Oops:)
     unk = sorted(c for c in called if c not in KW and c not in defined and c not in consts and c not in declared and c not in labels and not c.startswith('vb'))
     if unk: ok = False; print('UNRESOLVED names (typo or missing helper?):', unk)

@@ -33,6 +33,7 @@
 '   - lean: one edge read per view, partial rebuilds, no per-step redraws, batch mode
 '   - OK / PROBLEM judged on read-back values; GD&T symbols looked up in your gtol.sym
 '
+'  v3: compile fix (a variable named eNum reads as the reserved word Enum)
 '  v2: fixed VIEW A-A stopping the macro (a variable named sp hid the function SP); the real
 '      error is now shown if the macro stops; each big step (VIEW A-A, dimensions, DETAIL B ...)
 '      reports its own error and the rest of the drawing is still built
@@ -107,7 +108,7 @@ Dim xMin As Double, xMax As Double, yMin As Double, yMax As Double
 
 Sub main()
     On Error GoTo Fail
-    Dim tmpl As String, eNum As Long, eDesc As String
+    Dim tmpl As String, errNo As Long, errText As String
     Set swApp = Application.SldWorks
     Set swMath = swApp.GetMathUtility
     report = "": problems = "": todoList = "": nOK = 0: nBad = 0: nTodo = 0
@@ -147,11 +148,11 @@ Sub main()
     Stage "Step 17 - save drawing and PDF":           SaveAll
     Exit Sub
 Fail:
-    eNum = Err.Number: eDesc = Err.Description          ' v2: before the clean-up below clears it
+    errNo = Err.Number: errText = Err.Description       ' v2: before the clean-up below clears it
     NoDimDialog False
     SpeedMode False
     MsgBox "The macro stopped at: " & curStep & vbCrLf & vbCrLf & _
-           "Error " & eNum & ": " & eDesc & vbCrLf & vbCrLf & _
+           "Error " & errNo & ": " & errText & vbCrLf & vbCrLf & _
            "Checks passed so far: " & nOK & vbCrLf & _
            IIf(nBad = 0, "", "Problems so far:" & vbCrLf & Left(problems, 500)), vbCritical, DRAW_NAME & " macro"
 End Sub
