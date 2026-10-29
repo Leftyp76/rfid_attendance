@@ -18,7 +18,8 @@ KW = set('''If Then Else ElseIf End For Next To Step Each In Do Loop While Wend 
 And Or True False Nothing Empty Long Double String Boolean Integer Variant Object Optional ByVal ByRef On Error GoTo Resume
 MsgBox InputBox IIf Left Mid Len Trim UCase InStr InStrRev Replace Format Date Now Abs Sqr Array IsArray IsEmpty CLng CDbl
 CStr CInt Environ Dir ChrW Chr FreeFile Open Output Print Close Application CreateObject LBound UBound ReDim Err Const
-Option Explicit Raise Clear Atn Sgn Mod Fail Preserve Call'''.split())
+Option Explicit Raise Clear Atn Sgn Mod Fail Preserve Call
+LOF EOF Input FileLen Line Cos Sin Tan Split Join Round Space Hex TypeName'''.split())
 BUILTINS = ['Sgn', 'Len', 'Left', 'Right', 'Mid', 'Format', 'Date', 'Dir', 'Abs', 'Sqr', 'Atn', 'Val', 'Str', 'Int', 'Fix', 'Log', 'Exp']
 
 def main():
@@ -42,6 +43,16 @@ def main():
         if re.search(r'"[^"]*\\\\[^"]*"', l) and not l.strip().startswith("'"):
             ok = False; print(f'line {i}: double backslash inside a string (path separator should be a single \\):', l.strip()[:90])
     if not byref_check(t, code, defined): ok = False
+    # a module-level variable with the same name as a procedure (VBA ignores case): "Ambiguous name detected"
+    first_proc = re.search(r'^(?:Sub|Function) ', t, flags=re.M)
+    head = code[:first_proc.start()] if first_proc else code
+    modvars = set()
+    for m in re.finditer(r'^(?:Dim|Private|Public)\s+(.*)$', head, flags=re.M):
+        for part in m.group(1).split(','):
+            mv = re.match(r'\s*(\w+)', part)
+            if mv: modvars.add(mv.group(1).lower())
+    clash = sorted(n for n in set(defined) if n.lower() in modvars)
+    if clash: ok = False; print('AMBIGUOUS name (module variable and procedure share it, case-insensitive):', clash)
     print(f'{len(t.splitlines())} lines, {len(defined)} procedures -> ' + ('OK' if ok else 'FIX THE ITEMS ABOVE'))
 
 def split_args(s):

@@ -12,6 +12,7 @@ Repo: `Leftyp76/rfid_attendance`, branch `claude/nice-hawking-yolktd`
 | `solidworks_hw7c/` | Drawing with **auxiliary view** D-D at 1:2 | Auxiliary views, other scales |
 | `solidworks_hw7d/` | Drawing with **detail view** E at 2:1, turned part | Detail views, revolved parts |
 | `solidworks_hw8a/` | Drawing with **SECTION A-A**, hole callouts, toleranced dims (±, limit, bilateral), datum and parallelism frame, 1:3 shaded iso; plus a part macro that changes an engraving depth | Section views, tolerances, GD&T, hole callouts |
+| `solidworks_hw8b/` | Turned part with **DETAIL A 3:1**, left end view, NOTES block, circularity / runout frames, datum on a dimension; hand steps listed as TO DO | Turned parts, detail views, notes |
 | `solidworks_tools/` | `sw_extract.py` reads a SolidWorks file, `vba_static_check.py` checks a macro | Every job |
 
 **Start every new drawing macro from the newest working drawing macro** (`HW8A_Drawing_Macro.bas` v4; `HW7D` for detail views). Read section 4.8 first: it lists the mistakes HW#8A v1–v4 made, and the new macro must not repeat them. Keep its proven helpers unchanged and replace only the part-specific procedures.
@@ -152,9 +153,13 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 4. **The section label stayed** ("SECTION A-A" plus "SCALE 1 : 1", the scale line appearing because the view scale differed from the sheet's), overlapping the title block. Setting `Annotation.Visible` did not hide it. Keep the sheet scale equal to the view scales so no scale line appears, place the label clear of the title block, and list "right-click the label > Hide" under things for the user, not as a silent OK.
 5. **Tolerance values silently stayed 0** (±.000, .080/.080). `tol.Type` stuck but `SetValues2(min, max, 2, Empty)` changed nothing. Try `SetValues2(min, max, 1, "")`, `SetValues2(..., 2, "")`, `SetValues(min, max)` in turn, and read back `GetMaxValue` / `GetMinValue` after each.
 6. **Wrong symbol codes** render as literal text or a blank cell. Correct codes: counterbore `<HOLE-SPOT>`, countersink `<HOLE-SINK>`, depth `<HOLE-DEPTH>`, diameter `<MOD-DIAM>`, ± `<MOD-PM>`, degree `<MOD-DEG>`, parallelism `<IGTOL-PARA>` (the gtol codes are 4-letter: `<IGTOL-POSI>`, `<IGTOL-CONC>`). `<HOLE-CBORE>`, `<HOLE-CSINK>` and `<IGTOL-PARALLEL>` do not exist.
+7a. **Compile error "Ambiguous name detected"** (caught before HW#8B shipped): a module variable `todo` and a procedure `ToDo` share a name, and VBA ignores case. `vba_static_check.py` now flags this too.
 7. **Compile error "ByRef argument type mismatch"**: `CylSpan(faces(i))` passed a Variant array element to `fc As Object`. Declare such parameters `ByVal`. `vba_static_check.py` now flags this.
 8. **Hole recognition**: blind-hole depths in Hole Wizard may run to the drill tip, so a depth window like .35 ± .03 failed. Measure a bore's length from the centres of its circular edges (not `GetBox`). Tell blind holes apart by relative depth (shallower vs deeper), and list every hole's measurements as `Info` lines in the check file.
 9. **Circular-group centre marks** (`InsertCenterMark3(2, ...)`) gave plain + marks, not the reference's marks turned toward the centre. Still unsolved.
+11. **Notes are included when the drawing refers to them** (HW#8A balloon "3", HW#8B notes 3 and 4). Place each number and its text as separate notes so the columns line up. Use `<MOD-DEG>` and `<HOLE-DEPTH>` in note text.
+12. **Gtol codes:** circularity `<IGTOL-CIRC>`, circular runout `<IGTOL-SRUN>`, total runout `<IGTOL-TRUN>`, parallelism `<IGTOL-PARA>`, position `<IGTOL-POSI>`, concentricity `<IGTOL-CONC>`. The macro also looks the code up in the computer's gtol.sym (`ProgramData\SOLIDWORKS\SOLIDWORKS 20xx\lang\english`).
+13. **A tolerance block that already matches the reference is left alone**: read it back, and change it only if it differs (HW#8B keeps ±.01 / ±.005).
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)
