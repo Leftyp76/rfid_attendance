@@ -9,7 +9,8 @@ Checks:
   - variables that shadow VBA built-ins (e.g. 'Dim sgn As Double' breaks Sgn())
   - integer division written as '\\\\' (escaping accident) instead of '\\'
   - a double-backslash string literal (path separator escaping accident)
-  - typed arrays passed to Variant ByRef helpers is not detectable here: see the playbook rule
+  - an element of a Variant array (e.g. faces(i)) passed to a ByRef typed parameter
+    (e.g. 'fc As Object' without ByVal): VBA refuses it with "ByRef argument type mismatch"
 """
 import re, sys
 
@@ -40,7 +41,57 @@ def main():
         if '\\\\' in c: ok = False; print(f'line {i}: double backslash in code (integer division should be a single \\):', l.strip()[:90])
         if re.search(r'"[^"]*\\\\[^"]*"', l) and not l.strip().startswith("'"):
             ok = False; print(f'line {i}: double backslash inside a string (path separator should be a single \\):', l.strip()[:90])
+    if not byref_check(t, code, defined): ok = False
     print(f'{len(t.splitlines())} lines, {len(defined)} procedures -> ' + ('OK' if ok else 'FIX THE ITEMS ABOVE'))
+
+def split_args(s):
+    out, depth, cur = [], 0, ''
+    for ch in s:
+        if ch == '(': depth += 1
+        elif ch == ')': depth -= 1
+        if ch == ',' and depth == 0:
+            out.append(cur.strip()); cur = ''
+        else:
+            cur += ch
+    if cur.strip(): out.append(cur.strip())
+    return out
+
+def byref_check(t, code, defined):
+    """Variant-array element -> ByRef typed parameter = compile error 'ByRef argument type mismatch'."""
+    ok = True
+    joined = re.sub(r' _\n\s*', ' ', t)
+    sigs = {}
+    for m in re.finditer(r'^(?:Sub|Function) (\w+)\((.*?)\)(?: As \w+)?\s*$', joined, flags=re.M):
+        params = []
+        for prm in split_args(m.group(2)):
+            prm = re.sub(r'^Optional\s+', '', prm)
+            byval = prm.startswith('ByVal ')
+            prm = re.sub(r'^(ByVal|ByRef)\s+', '', prm)
+            mt = re.match(r'(\w+)(\(\))?\s+As\s+(\w+)', prm)
+            params.append(None if (byval or not mt or mt.group(2) or mt.group(3) == 'Variant') else mt.group(3))
+        sigs[m.group(1)] = params
+    arrtype = {m.group(1): m.group(2) for m in re.finditer(r'\b(\w+)\s*\([^)]*\)\s+As\s+(\w+)', code)}
+    jcode = re.sub(r' _\n\s*', ' ', code)
+    for i, line in enumerate(jcode.split('\n'), 1):
+        for name, params in sigs.items():
+            if not any(params): continue
+            for m in re.finditer(r'(?:^|[^\w.])' + name + r'(\(|\s+(?=[^=\s]))', line):
+                if m.group(1) == '(':
+                    depth, j = 1, m.end()
+                    while j < len(line) and depth:
+                        depth += {'(': 1, ')': -1}.get(line[j], 0); j += 1
+                    args = split_args(line[m.end():j - 1])
+                else:
+                    if not re.match(r'^\s*(?:\w+:\s*)?' + name + r'\s', line.split(':')[-1] if False else line.strip() + ' ') and not re.search(r':\s*' + name + r'\s', line):
+                        continue
+                    args = split_args(line[m.end():].split(':')[0])
+                for k, a in enumerate(args):
+                    if k < len(params) and params[k]:
+                        ma = re.match(r'^(\w+)\([^()]*\)$', a.strip())
+                        if ma and ma.group(1) not in defined and arrtype.get(ma.group(1)) != params[k]:
+                            ok = False
+                            print(f'line ~{i}: {a.strip()} (a Variant array element?) passed to ByRef "As {params[k]}" parameter of {name} - make that parameter ByVal')
+    return ok
 
 if __name__ == '__main__':
     main()

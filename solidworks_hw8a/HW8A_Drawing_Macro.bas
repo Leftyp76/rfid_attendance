@@ -32,6 +32,7 @@
 '   - SECTION A-A stays projected from the front view; the report checks both centres are level.
 '   - The dimensions above the section are stacked .24 in apart, with their text in one column.
 '
+'  v3: fixed "ByRef argument type mismatch" (CylSpan takes the face ByVal)
 '  v2: views forced to 1:1 (SolidWorks had auto-scaled them to 1:2); bolt circle and hole circles
 '      scale-aware; hole depths measured exactly from their edges, blind holes told apart by depth;
 '      tolerance values tried several ways until they read back; counterbore <HOLE-SPOT>,
@@ -410,7 +411,7 @@ Function BoxMid(bx As Variant) As Variant
 End Function
 
 ' length of a cylinder face along vF, from the centres of its circular edges (exact); -1 if unknown
-Function CylSpan(fc As Object) As Double
+Function CylSpan(ByVal fc As Object) As Double
     Dim eds As Variant, j As Long, c As Object, cc As Variant, t As Double, lo As Double, hi As Double, n As Long
     CylSpan = -1
     lo = 1E+30: hi = -1E+30
