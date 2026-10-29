@@ -160,6 +160,10 @@ These are the problems found in HW#8A runs. Each lists what went wrong and what 
 11. **Notes are included when the drawing refers to them** (HW#8A balloon "3", HW#8B notes 3 and 4). Place each number and its text as separate notes so the columns line up. Use `<MOD-DEG>` and `<HOLE-DEPTH>` in note text.
 12. **Gtol codes:** circularity `<IGTOL-CIRC>`, circular runout `<IGTOL-SRUN>`, total runout `<IGTOL-TRUN>`, parallelism `<IGTOL-PARA>`, position `<IGTOL-POSI>`, concentricity `<IGTOL-CONC>`. The macro also looks the code up in the computer's gtol.sym (`ProgramData\SOLIDWORKS\SOLIDWORKS 20xx\lang\english`).
 13. **A tolerance block that already matches the reference is left alone**: read it back, and change it only if it differs (HW#8B keeps ±.01 / ±.005).
+14. **`GetBodyBox` is loose round modelled threads** (HW#8B: 4.020 for 4.000), so the origin and every pick point shifted. Take a turned part's ends from its flat end faces (`PlaneParams` with normal along the axis).
+15. **"Already done?" tests must not match a substring**: note 1 contained "IN-LAB ASSIGNMENT #8B", so the title block was skipped. Compare whole note texts.
+16. **Outline curves (silhouettes) can be dimensioned after all**: place sketch points, lines or arcs exactly on the outline with a proven sketch method (`FindCand`: a test point measured from a real edge), then dimension those and check the value. Used for Ø.775, (Ø.493), 30° and R.047 in HW#8B.
+17. **Modelled threads make a view slow**: turn its hidden lines on only at the end, skip helix edges at once, read each view's edges once, and never pick on the sheet over the thread.
 10. **The MsgBox cut the problem list off.** Keep PROBLEM labels short (one line each) and ask the user for `HWxx_checks.txt` when there are several problems.
 
 ## 5. Things that need the user (say so up front)

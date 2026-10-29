@@ -32,6 +32,10 @@
 '     scale is read back; tolerance block read back; symbol codes from the playbook
 '   - things a macro cannot pick are listed as TO DO BY HAND with exact steps
 '
+'  v4: part ends from its flat end faces (the body box ran .02 long round the thread and shifted
+'      every pick); title block no longer skipped (note 1 contains the title); outline curves
+'      (dia .775, (dia .493), 30 deg, R.047) dimensioned on exact sketch items; frame leaders and
+'      datum A attached to real edges; DETAIL A circle placed by a proven sketch method
 '  v3: the right end and the thread note use only the edge table (v2 fished on the thread: slow);
 '      SolidWorks' own tapped-hole callout and centre mark are reused, not doubled
 '  v2: much faster on the modelled threads: the main view's hidden lines are turned on only at
@@ -50,6 +54,7 @@ Dim swApp As Object, swMath As Object, swPart As Object, swModel As Object, swDr
 Dim partPath As String, curStep As String, report As String, problems As String, todoList As String
 Dim nOK As Long, nBad As Long, nTodo As Long
 Dim lastDim As Object                      ' the dimension TryDimSel made last
+Dim skCandMain As Integer                  ' sketch coordinate method proven in the main view (-1 = none)
 Dim eKey As String                         ' which view (and where / how big) the edge table holds
 Dim oldInputDim As Boolean, savedInputDim As Boolean
 
@@ -108,7 +113,7 @@ Sub main()
     report = "": problems = "": todoList = "": nOK = 0: nBad = 0: nTodo = 0
     detailPending = False: resumed = False
     Set viewMain = Nothing: Set viewLeft = Nothing: Set viewDet = Nothing: Set viewIso = Nothing   ' VBA keeps these between runs
-    Set lastDim = Nothing: eKey = ""
+    Set lastDim = Nothing: eKey = "": skCandMain = -1
     NoDimDialog True
 
     Stage "Step 1 - find the open part":           FindPart
@@ -155,7 +160,7 @@ Sub main()
     End If
     Stage "Step 10 - title block"
     ClearCommand
-    If SheetHasText("IN-LAB ASSIGNMENT #8B") Then
+    If SheetHasNote("IN-LAB ASSIGNMENT #8B") Then
         Check True, "Title block already filled in - left as it is"
     Else
         TitleBlock
@@ -324,8 +329,31 @@ Sub FindOrientation()
             Next
         Next
     Next
+    ' v4: the ends come from the flat end faces - exact. The body box runs loose round the modelled
+    ' thread (4.020 for 4.000), which shifted every pick point in v3.
+    Dim pp As Variant, nn As Variant, lo As Double, hi As Double
+    lo = 1E+30: hi = -1E+30
+    For b = LBound(bodies) To UBound(bodies)
+        faces = bodies(b).GetFaces
+        For i = LBound(faces) To UBound(faces)
+            Set s = faces(i).GetSurface
+            If s.IsPlane Then
+                pp = s.PlaneParams
+                nn = Unit(Arr3(pp(0), pp(1), pp(2)))
+                If Abs(Dot(nn, vR)) > 0.999 Then
+                    t = Dot(Arr3(pp(3), pp(4), pp(5)), vR)
+                    If t < lo Then lo = t
+                    If t > hi Then hi = t
+                End If
+            End If
+        Next
+    Next
+    If hi > lo Then
+        Info "Part ends from the end faces: " & Format((hi - lo) / IN_M, "0.0000") & " apart (body box said " & Format((rMax - rMin) / IN_M, "0.0000") & ")"
+        rMin = lo: rMax = hi
+    End If
     pOrg = Add3(a0, Scl(vR, rMin - Dot(a0, vR)))                  ' on the axis, at the left end
-    Check (Abs((rMax - rMin) / IN_M - 4#) < 0.01), "Part length 4.000 (measured " & Format((rMax - rMin) / IN_M, "0.000") & ")"
+    Check (Abs((rMax - rMin) / IN_M - 4#) < 0.002), "Part length 4.000 (measured " & Format((rMax - rMin) / IN_M, "0.000") & ")"
 End Sub
 
 ' part coordinates (inches): x along the axis from the left end, r up from the axis, z toward you
@@ -528,7 +556,8 @@ Function MakeDetail() As Object
     c = SheetPt(viewMain, X_DETC, 0#, 0#)
     sc = ViewSc(viewMain)
     rad = DET_R * sc
-    For Each cand In Array(0, 3, 2, 1)
+    ' v4: the circle goes where the main view's proven sketch method puts it (no wrong-place details)
+    For Each cand In IIf(skCandMain >= 0, Array(skCandMain), Array(0, 3, 2, 1))
         Set seg = DrawViewCircle(viewMain, c, rad, CInt(cand))
         If seg Is Nothing Then
             diag = diag & "m" & cand & ": no circle. "
@@ -557,7 +586,7 @@ Function MakeDetail() As Object
             Next
             If Not dv Is Nothing Then
                 SetViewScale dv, DET_SCALE, 1#
-                If DetailHasNeck(dv) Then used = "m" & cand: Exit For
+                If DetailHasNeck(dv) Then used = "method " & cand: Exit For
                 diag = diag & "m" & cand & ": wrong place. "
                 DeleteView dv
                 Set dv = Nothing
@@ -590,7 +619,7 @@ End Sub
 ' a real DETAIL A shows the neck: a side-on circle edge .400 long near x = 3.17 .. 3.22
 Function DetailHasNeck(dv As Object) As Boolean
     eKey = ""                                          ' a new detail can reuse a deleted one's name and place
-    DetailHasNeck = (DiaLine(dv, X_SHANK, X_NECK2 + 0.01, 0.4, 0.01) >= 0)
+    DetailHasNeck = (DiaLine(dv, X_SHANK - 0.02, X_NECK2 + 0.03, 0.4, 0.01) >= 0)
 End Function
 
 ' the side-on circle edge (a vertical line on the sheet) of diameter dia between axial positions x1 and x2
@@ -909,6 +938,7 @@ Sub DimMain()
     D = ChrW(216)
     CollectEdges viewMain
     xL = SX(viewMain, 0): xR = SX(viewMain, 4#): yA = SY(viewMain, 0)
+    skCandMain = FindCand(viewMain, 2.5, 0.2, Array(0#, 0.3, 0#), 2.5, "Main view")
 
     ' lengths, stacked above the part
     DimToEnd viewMain, Array(0#, 0.3, 0#), (xL + xR) / 2, yA + 1.22, 4#, "Main     4.000"
@@ -920,13 +950,12 @@ Sub DimMain()
     ' diameters, from the side-on circle edges of that size
     DiaByLen viewMain, 0#, X_COLLAR, 0.925, xL - 1.42, yA, D & ".925", 3, False
     DatumOnLastDim xL - 1.43, yA - 1.39
-    ' outline curves (silhouettes) can never be picked by a macro: no slow attempts, straight to the list
-    If True Then
-        ToDo "Main " & D & ".775: the groove bottom is an outline curve a macro cannot pick. Smart Dimension: click the groove's top bottom-curve, then its lower one, place it left of the part next to " & D & ".925 (" & D & " is added automatically for a diameter; if not, add it)"
-    End If
+    ' groove bottom: an outline curve, so the diameter goes between two sketch points on it (v4)
+    SkDia viewMain, skCandMain, (X_GRV1 + X_GRV2) / 2, 0.3875, xL - 0.7, yA, "Main     " & D & ".775 (groove bottom)", False, _
+          "Smart Dimension the groove's two bottom curves, place it left of the part next to " & D & ".925, add " & D & " if missing
     DiaByLen viewMain, X_COLLAR - 0.01, X_SHANK + 0.01, 0.625, xR + 0.67, yA + 0.47, D & ".625", 3, False
-    DiaByLen viewMain, X_NECK2, 4.01, 0.493, xR + 0.32, yA + 0.8, "(" & D & ".493)", 3, True, _
-             "the modelled thread leaves no whole " & D & ".493 circle edge. Smart Dimension the thread's top and bottom crest lines, place it right of the part above " & D & ".625, then in the PropertyManager add " & D & " and tick Parentheses (3 decimals)"
+    SkDia viewMain, skCandMain, 3.6, 0.2465, xR + 0.32, yA + 0.8, "Main     (" & D & ".493) thread major", True, _
+             "Smart Dimension the thread's top and bottom crest lines, place it right of the part above " & D & ".625, add " & D & " and tick Parentheses (3 decimals)"
 
     ' notes with leaders
     LeaderNote2 viewMain, Array(0.05, 0.44, 0#), Array(0#, 0.39, 0#), "2X .05 X 45<MOD-DEG>", xL - 1.45, yA + 0.81, "Main     2X .05 X 45" & ChrW(176)
@@ -1006,6 +1035,17 @@ Sub DatumOnLastDim(ByVal tx As Double, ByVal ty As Double)
     n0 = swModel.SelectionManager.GetSelectedObjectCount2(-1)
     Set dt = Nothing
     If n0 = 1 Then Set dt = swModel.InsertDatumTag2
+    If dt Is Nothing Then                              ' v4: select the dimension by its name
+        swModel.ClearSelection2 True
+        swModel.Extension.SelectByID2 lastDim.GetNameForSelection, "DIMENSION", 0#, 0#, 0#, False, 0, Nothing, 0
+        If swModel.SelectionManager.GetSelectedObjectCount2(-1) = 1 Then Set dt = swModel.InsertDatumTag2
+    End If
+    If dt Is Nothing Then                              ' last way: on the dia .925 surface's edge, below the part
+        swModel.ClearSelection2 True
+        swDraw.ActivateView viewMain.GetName2
+        If PickAt(viewMain, Array(X_GRV1, -0.45, 0#)) Then Set dt = swModel.InsertDatumTag2
+        If Not dt Is Nothing Then Info "Datum A is attached to the " & ChrW(216) & ".925 groove edge (SolidWorks would not attach it to the dimension)"
+    End If
     If Not dt Is Nothing Then
         dt.SetLabel "A"
         dt.GetAnnotation.SetPosition2 tx * IN_M, ty * IN_M, 0#
@@ -1127,8 +1167,8 @@ End Sub
 Sub GtolMain()
     Dim xL As Double, yA As Double
     xL = SX(viewMain, 0): yA = SY(viewMain, 0)
-    MakeGtol viewMain, Array(0.385, -0.4625, 0#), "<IGTOL-CIRC>", ".003", "", xL - 0.88, yA - 0.855, "Main     circularity .003 frame"
-    MakeGtol viewMain, Array(2.43, -0.3125, 0#), "<IGTOL-SRUN>", ".003", "A", xL + 3.2, yA - 0.79, "Main     circular runout .003 A frame"
+    MakeGtol viewMain, Array(0.05, -0.43, 0#), "<IGTOL-CIRC>", ".003", "", xL - 0.88, yA - 0.855, "Main     circularity .003 frame"
+    MakeGtol viewMain, Array(X_COLLAR, -0.29, 0#), "<IGTOL-SRUN>", ".003", "A", xL + 3.2, yA - 0.79, "Main     circular runout .003 A frame"
 End Sub
 
 ' a feature control frame; its leader goes to the outline at p if SolidWorks lets the macro pick it.
@@ -1138,7 +1178,7 @@ Sub MakeGtol(v As Object, p As Variant, ByVal sym As String, ByVal tol1 As Strin
     Dim g As Object, s As Variant, hasLeader As Boolean, n0 As Long, rb As String
     swModel.ClearSelection2 True
     swDraw.ActivateView v.GetName2
-    hasLeader = False                                  ' the leader goes to an outline, which a macro cannot pick
+    hasLeader = PickAt(v, p)                           ' v4: a real edge at the outline, picked at that point
     Set g = Nothing
     On Error Resume Next
     Set g = swModel.InsertGtol
@@ -1166,7 +1206,7 @@ Sub MakeGtol(v As Object, p As Variant, ByVal sym As String, ByVal tol1 As Strin
         Check False, label & " - values read back as " & rb & "; double-click it and set " & tol1 & IIf(Len(datum) > 0, ", datum " & datum, "")
     End If
     Info "  symbol " & sym & IIf(SymInLibrary(sym), " found in your gtol.sym", " not checked (gtol.sym not found or symbol not listed) - look that the symbol shows")
-    If Not hasLeader Then ToDo label & ": its leader must go to the part outline, which a macro cannot pick. Click the frame, drag the small leader handle (or right-click > Add leader) to the bottom outline as on the reference"
+    If Not hasLeader Then ToDo label & ": no edge could be picked for its leader. Click the frame, drag its leader handle to the bottom outline as on the reference"
 End Sub
 
 ' what the frame says (tolerance and datum of frame 1), "" if SolidWorks does not tell
@@ -1209,13 +1249,8 @@ Sub DimDetail()
     CollectEdges viewDet
     dX = SX(viewDet, X_SHANK): dY = SY(viewDet, 0)
     MakeDimP viewDet, "H", Array(X_SHANK, 0.28, 0#), Array(X_NECK2, 0.15, 0#), dX - 0.52, dY + 1.106, 0.094, "Detail A .094 (neck)", "", 3
-    If True Then                                       ' the chamfer is an outline line: by hand
-        ToDo "Detail A 30" & ChrW(176) & ": the chamfer is an outline line a macro cannot pick. Smart Dimension: click the shank's end face line, then the slanted chamfer line at the thread start; place it above (30" & ChrW(176) & ")"
-    End If
     DiaByLen viewDet, X_SHANK, X_NECK2 + 0.01, 0.4, dX + 1.95, dY, D & ".400", 3, False
-    If True Then                                       ' the fillet is an outline curve: by hand
-        ToDo "Detail A 3 X R.047: the fillet is an outline curve a macro cannot pick. Smart Dimension on the lower fillet curve at the neck, place it lower right, then type ""3 X "" in front of R.047 (3 decimals)"
-    End If
+    DetailSketchDims
 End Sub
 
 ' NOTES block, top left: each number and each text is its own note so the columns line up exactly
@@ -1268,6 +1303,37 @@ Sub LeaderNoteI(v As Object, ByVal idx As Long, ByVal text As String, ByVal tx A
         Check True, label
     End If
 End Sub
+
+' select the real edge at part point p in view v by picking at that point (so a leader lands there)
+Function PickAt(v As Object, p As Variant) As Boolean
+    Dim s As Variant, dv As Object
+    s = SheetPt(v, CDbl(p(0)), CDbl(p(1)), CDbl(p(2)))
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    On Error Resume Next
+    swModel.Extension.SelectByID2 "", "EDGE", s(0) * IN_M, s(1) * IN_M, 0#, False, 0, Nothing, 0
+    If swModel.SelectionManager.GetSelectedObjectCount2(-1) = 1 Then
+        Set dv = Nothing
+        Set dv = swModel.SelectionManager.GetSelectedObjectsDrawingView2(1, -1)
+        PickAt = True
+        If Not dv Is Nothing Then PickAt = (dv.GetName2 = v.GetName2)
+    End If
+    If Not PickAt Then
+        CollectEdges v                                 ' else the nearest table edge (leader then lands on it)
+        PickAt = SelPt(v, p, False)
+    End If
+End Function
+
+' is a note with exactly this text on the sheet (v4: note 1 also contains the title's words)?
+Function SheetHasNote(ByVal t As String) As Boolean
+    Dim nt As Object
+    On Error Resume Next
+    Set nt = swDraw.GetFirstView.GetFirstNote
+    Do While Not nt Is Nothing
+        If UCase(Trim(nt.GetText)) = UCase(t) Then SheetHasNote = True: Exit Function
+        Set nt = nt.GetNext
+    Loop
+End Function
 
 ' does this view already carry dimensions (from an earlier run)?
 Function HasDims(v As Object) As Boolean
@@ -1425,6 +1491,218 @@ Function DeleteDim(dd As Object) As Boolean
         swModel.ClearSelection2 True
     End If
     DeleteDim = (TotalDims() < n0)
+End Function
+
+' =====================================================================================
+'  Sketch items in a view, for outline curves a macro cannot pick (v4)
+'  A tiny sketch item is placed exactly on the outline and dimensioned; the value read back
+'  proves it is in the right place. Which sketch coordinate method a view uses is found first
+'  with a test point measured from a real edge (the test dimension's deletion is confirmed).
+' =====================================================================================
+
+' sheet point (inches) -> view sketch point (metres).  cand 0: the view sketch's own transform;
+' 1: sheet coordinates; 2: from the model origin; 3: from the view centre   (from HW#8A)
+Function ToSk(v As Object, p As Variant, ByVal cand As Integer) As Variant
+    Dim o As Variant, sc As Double, pos As Variant, sk As Object, xf As Object, a(2) As Double, va As Variant
+    Dim q As Object, r As Variant
+    sc = 1#
+    On Error Resume Next
+    sc = v.ScaleDecimal
+    If sc <= 0 Then sc = 1#
+    Select Case cand
+        Case 0
+            Set sk = v.GetSketch
+            Set xf = sk.ModelToSketchTransform
+            If xf Is Nothing Then Exit Function
+            a(0) = p(0) * IN_M: a(1) = p(1) * IN_M: a(2) = 0#: va = a
+            Set q = swMath.CreatePoint((va))
+            Set q = q.MultiplyTransform(xf)
+            r = q.ArrayData
+            If IsArray(r) Then ToSk = Arr3(r(0), r(1), 0#)
+        Case 1
+            ToSk = Arr3(p(0) * IN_M, p(1) * IN_M, 0#)
+        Case 2
+            o = XfPt(v.ModelToViewTransform, 0#, 0#, 0#)
+            ToSk = Arr3((p(0) - o(0)) * IN_M / sc, (p(1) - o(1)) * IN_M / sc, 0#)
+        Case 3
+            pos = v.Position
+            ToSk = Arr3((p(0) * IN_M - pos(0)) / sc, (p(1) * IN_M - pos(1)) / sc, 0#)
+    End Select
+End Function
+
+' part point (x along the axis, r up) -> sketch point in view v
+Function SkAt(v As Object, ByVal x As Double, ByVal r As Double, ByVal cand As Integer) As Variant
+    SkAt = ToSk(v, SheetPt(v, x, r, 0#), cand)
+End Function
+
+Function SkPoint(v As Object, ByVal x As Double, ByVal r As Double, ByVal cand As Integer) As Object
+    Dim p As Variant
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    p = SkAt(v, x, r, cand)
+    If Not IsArray(p) Then Exit Function
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = True
+    Set SkPoint = swModel.SketchManager.CreatePoint(p(0), p(1), 0#)
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
+End Function
+
+Function SkLine(v As Object, ByVal x1 As Double, ByVal r1 As Double, ByVal x2 As Double, ByVal r2 As Double, ByVal cand As Integer) As Object
+    Dim p As Variant, q As Variant
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    p = SkAt(v, x1, r1, cand): q = SkAt(v, x2, r2, cand)
+    If Not IsArray(p) Or Not IsArray(q) Then Exit Function
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = True
+    Set SkLine = swModel.SketchManager.CreateLine(p(0), p(1), 0#, q(0), q(1), 0#)
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
+End Function
+
+' arc: centre (xc, rc), from (xs, rs) to (xe, re); dirn -1 clockwise, 1 counter-clockwise
+Function SkArc(v As Object, ByVal xc As Double, ByVal rc As Double, ByVal xs As Double, ByVal rs As Double, _
+               ByVal xe As Double, ByVal re As Double, ByVal dirn As Integer, ByVal cand As Integer) As Object
+    Dim c As Variant, s As Variant, e As Variant
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    c = SkAt(v, xc, rc, cand): s = SkAt(v, xs, rs, cand): e = SkAt(v, xe, re, cand)
+    If Not IsArray(c) Or Not IsArray(s) Or Not IsArray(e) Then Exit Function
+    On Error Resume Next
+    swModel.SketchManager.AddToDB = True
+    Set SkArc = swModel.SketchManager.CreateArc(c(0), c(1), 0#, s(0), s(1), 0#, e(0), e(1), 0#, dirn)
+    swModel.SketchManager.AddToDB = False
+    swModel.ClearSelection2 True
+End Function
+
+' horizontal test dimension from sketch item it to the edge through part point pEdge; value in
+' inches (-1 if none). The test dimension is deleted and the deletion confirmed (HW#8A lesson 2).
+Function TestH(v As Object, it As Object, pEdge As Variant) As Double
+    Dim dd As Object, n As Long, tx As Double, ty As Double
+    TestH = -1
+    CollectEdges v
+    tx = SX(v, CDbl(pEdge(0))): ty = SY(v, 0.9)
+    swModel.ClearSelection2 True
+    swDraw.ActivateView v.GetName2
+    On Error Resume Next
+    it.Select4 False, Nothing
+    n = swModel.SelectionManager.GetSelectedObjectCount2(-1)
+    On Error GoTo 0
+    If n <> 1 Then swModel.ClearSelection2 True: Exit Function
+    If Not SelPt(v, pEdge, True) Then swModel.ClearSelection2 True: Exit Function
+    If swModel.SelectionManager.GetSelectedObjectCount2(-1) <> 2 Then swModel.ClearSelection2 True: Exit Function
+    Set dd = Nothing
+    On Error Resume Next
+    Set dd = swModel.AddHorizontalDimension2(tx * IN_M, ty * IN_M, 0#)
+    On Error GoTo 0
+    swModel.ClearSelection2 True
+    If dd Is Nothing Then Exit Function
+    On Error Resume Next
+    TestH = dd.GetDimension2(0).SystemValue / IN_M
+    On Error GoTo 0
+    If Not DeleteDim(dd) Then Check False, "A test dimension (" & Format(TestH, "0.000") & ") could not be deleted - click it and press Delete"
+End Function
+
+' which sketch coordinate method puts items where they belong in view v: a test point at (x, r)
+' must measure dWant from the edge through pEdge. Returns the method, or -1.
+Function FindCand(v As Object, ByVal x As Double, ByVal r As Double, pEdge As Variant, ByVal dWant As Double, ByVal label As String) As Integer
+    Dim cand As Variant, pt As Object, d As Double, tried As String
+    FindCand = -1
+    For Each cand In Array(2, 3, 1, 0)
+        Set pt = SkPoint(v, x, r, CInt(cand))
+        If pt Is Nothing Then
+            tried = tried & "m" & cand & ": no point. "
+        Else
+            d = TestH(v, pt, pEdge)
+            DeleteSeg pt
+            If Abs(d - dWant) < 0.003 Then
+                FindCand = CInt(cand)
+                Info label & ": sketch method " & cand & " (test point measured " & Format(d, "0.000") & ")"
+                Exit Function
+            End If
+            tried = tried & "m" & cand & ": " & Format(d, "0.000") & ". "
+        End If
+    Next
+    Info label & ": no sketch method matched (" & Trim(tried) & ")"
+End Function
+
+' a diameter between two sketch points on the outline at axial position x, radius r (both sides)
+Sub SkDia(v As Object, ByVal cand As Integer, ByVal x As Double, ByVal r As Double, ByVal tx As Double, ByVal ty As Double, _
+          ByVal label As String, ByVal paren As Boolean, ByVal hint As String)
+    Dim p1 As Object, p2 As Object, why As String
+    If cand < 0 Then ToDo label & ": " & hint: Exit Sub
+    Set p1 = SkPoint(v, x, r, cand)
+    Set p2 = SkPoint(v, x, -r, cand)
+    why = "MISSING (sketch points not made)"
+    If Not p1 Is Nothing And Not p2 Is Nothing Then
+        swModel.ClearSelection2 True
+        swDraw.ActivateView v.GetName2
+        On Error Resume Next
+        p1.Select4 False, Nothing
+        p2.Select4 True, Nothing
+        On Error GoTo 0
+        why = TryDimSel("V", 2, tx, ty, 2 * r, "<MOD-DIAM>", 3, "", paren, True)
+    End If
+    If Len(why) = 0 Then
+        Check True, label & " (on the outline, measured " & Format(2 * r, ".000") & ")"
+    Else
+        DeleteSeg p1: DeleteSeg p2
+        ToDo label & " (" & why & "): " & hint
+    End If
+End Sub
+
+' DETAIL A's 30 deg chamfer and R.047 fillet: a sketch line / arc laid exactly over each outline
+Sub DetailSketchDims()
+    Dim cand As Integer, ln As Object, arc As Object, why As String, dX As Double, dY As Double, t30 As Double
+    dX = SX(viewDet, X_SHANK): dY = SY(viewDet, 0)
+    cand = FindCand(viewDet, X_SHANK + 0.075, 0.27, Array(X_SHANK, 0.28, 0#), 0.075, "DETAIL A")
+    If cand < 0 Then
+        ToDo "Detail A 30" & ChrW(176) & ": Smart Dimension the shank's end face line and the slanted chamfer line at the thread start; place it above"
+        ToDo "Detail A 3 X R.047: Smart Dimension the lower fillet curve at the neck, place it lower right, type ""3 X "" in front (3 decimals)"
+        Exit Sub
+    End If
+    ' 30 deg: the chamfer runs from the neck (dia .400) at 3.219 up to the thread's major dia, 30 deg from the end face
+    t30 = Tan30()
+    Set ln = SkLine(viewDet, X_NECK2, 0.2, X_NECK2 + 0.0465 * t30, 0.2465, cand)
+    why = "MISSING (chamfer line not made)"
+    If Not ln Is Nothing Then
+        CollectEdges viewDet
+        swModel.ClearSelection2 True
+        swDraw.ActivateView viewDet.GetName2
+        On Error Resume Next
+        ln.Select4 False, Nothing
+        On Error GoTo 0
+        SelPt viewDet, Array(X_SHANK, 0.28, 0#), True
+        why = TryDimSel("A", 2, dX + 0.42, dY + 1.48, 30#, "", 0, "", False, True)
+    End If
+    If Len(why) = 0 Then
+        Check True, "Detail A 30" & ChrW(176) & " (chamfer outline)"
+    Else
+        DeleteSeg ln
+        ToDo "Detail A 30" & ChrW(176) & " (" & why & "): Smart Dimension the shank's end face line and the slanted chamfer line at the thread start; place it above"
+    End If
+    ' R.047: lower fillet between the shank's end face and the neck
+    Set arc = SkArc(viewDet, X_SHANK + 0.047, -0.247, X_SHANK, -0.247, X_SHANK + 0.047, -0.2, -1, cand)
+    why = "MISSING (fillet arc not made)"
+    If Not arc Is Nothing Then
+        swModel.ClearSelection2 True
+        swDraw.ActivateView viewDet.GetName2
+        On Error Resume Next
+        arc.Select4 False, Nothing
+        On Error GoTo 0
+        why = TryDimSel("R", 1, dX + 1.14, dY - 1.12, 0.047, "3 X ", 3, "", False, True)
+    End If
+    If Len(why) = 0 Then
+        Check True, "Detail A 3 X R.047 (fillet outline)"
+    Else
+        DeleteSeg arc
+        ToDo "Detail A 3 X R.047 (" & why & "): Smart Dimension the lower fillet curve at the neck, place it lower right, type ""3 X "" in front (3 decimals)"
+    End If
+End Sub
+
+Function Tan30() As Double
+    Tan30 = 1# / Sqr(3#)
 End Function
 
 ' =====================================================================================
