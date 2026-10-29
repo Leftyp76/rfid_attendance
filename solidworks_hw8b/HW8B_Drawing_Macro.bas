@@ -32,6 +32,9 @@
 '     scale is read back; tolerance block read back; symbol codes from the playbook
 '   - things a macro cannot pick are listed as TO DO BY HAND with exact steps
 '
+'  v7: faster: only what changed is rebuilt (EditRebuild3; one full rebuild at the end), no redraw
+'      after every step, SolidWorks told a macro is running (CommandInProgress, feature tree
+'      paused - both restored at the end), DETAIL A tried 7 ways instead of 31
 '  v6: lean: every dimension on exact sketch points after one placement test per view, picks by a
 '      single click (no edge-table reads while dimensioning). v5's repeated edge reads and
 '      trial dimensions on the modelled threads crashed SolidWorks after 20 minutes
@@ -121,6 +124,7 @@ Sub main()
     Set viewMain = Nothing: Set viewLeft = Nothing: Set viewDet = Nothing: Set viewIso = Nothing   ' VBA keeps these between runs
     Set lastDim = Nothing: eKey = "": skCandMain = -1
     NoDimDialog True
+    SpeedMode True
 
     Stage "Step 1 - find the open part":           FindPart
     Stage "Step 2 - read the part orientation":    FindOrientation
@@ -132,6 +136,7 @@ Sub main()
     End If
     ' the main view is dimensioned BEFORE DETAIL A exists (a detail makes SolidWorks double-select
     ' main-view edges and refuse the dimensions)
+    SpeedMode True                                     ' now that the drawing exists: pause its feature tree too
     Stage "Step 6 - main and left view dimensions"
     ClearCommand
     If HasDims(viewMain) Then
@@ -182,6 +187,7 @@ Sub main()
     Stage "Step 12 - scales and alignment":       CheckScalesAndAlignment
     Stage "Step 13 - finish":                     FinishSheet
     NoDimDialog False
+    SpeedMode False
 
     If detailPending Then
         msg = vbCrLf & "DETAIL A (the macro could not make it):" & vbCrLf & _
@@ -202,6 +208,7 @@ Sub main()
     Exit Sub
 Fail:
     NoDimDialog False
+    SpeedMode False
     MsgBox "The macro stopped at: " & curStep & vbCrLf & vbCrLf & _
            "Error " & Err.Number & ": " & Err.Description & vbCrLf & vbCrLf & _
            "Checks passed so far: " & nOK & vbCrLf & _
@@ -219,6 +226,13 @@ Sub NoDimDialog(ByVal turnOff As Boolean)
         swApp.SetUserPreferenceToggle 10, oldInputDim
         savedInputDim = False
     End If
+End Sub
+
+' v7: tell SolidWorks a long macro is running (fewer screen and tree updates); always switched back
+Sub SpeedMode(ByVal turnOn As Boolean)
+    On Error Resume Next
+    swApp.CommandInProgress = turnOn
+    If Not swModel Is Nothing Then swModel.FeatureManager.EnableFeatureTree = Not turnOn
 End Sub
 
 ' show the step in SolidWorks' status bar (the modelled threads make some steps slow)
@@ -496,7 +510,7 @@ Sub EnsureSheetScale()
             ok = (Abs(p(2) - 1#) < 0.001 And Abs(p(3) - SHEET_DEN) < 0.001)
             If ok Then Exit For
             sh.SetProperties2 CLng(p(0)), CLng(p(1)), 1#, SHEET_DEN, False, CDbl(p(5)), CDbl(p(6)), True
-            swModel.ForceRebuild3 False
+            swModel.EditRebuild3
             eKey = ""
         End If
     Next
@@ -519,7 +533,7 @@ Function SetViewScale(v As Object, ByVal num As Double, ByVal den As Double) As 
         v.UseSheetScale = False
         v.ScaleRatio = va
         If Abs(ViewSc(v) - want) > 0.0005 Then Err.Clear: v.ScaleDecimal = want
-        swModel.ForceRebuild3 False
+        swModel.EditRebuild3
         eKey = ""
         On Error GoTo 0
     End If
@@ -569,7 +583,7 @@ Function MakeDetail() As Object
             diag = diag & "m" & cand & ": no circle. "
         Else
             Set dv = Nothing
-            For combo = -1 To 29
+            For combo = -1 To 5                           ' v7: the 7 likeliest ways (was 31)
                 If combo >= 0 Then
                     If SelectSeg(seg, c(0) + rad, c(1)) = 0 Then diag = diag & "m" & cand & ": not selectable. ": Exit For
                 End If
@@ -591,14 +605,13 @@ Function MakeDetail() As Object
                 If Not dv Is Nothing Then Exit For
             Next
             If Not dv Is Nothing Then
-                swModel.ForceRebuild3 False               ' v5: a new view reports its edges only after a rebuild
-                swModel.GraphicsRedraw2
+                swModel.EditRebuild3               ' v5: a new view reports its edges only after a rebuild
                 SetViewScale dv, DET_SCALE, 1#
                 If DetailHasNeck(dv) Then used = "method " & cand: Exit For
                 diag = diag & "m" & cand & ": wrong place. "
                 DeleteView dv
                 Set dv = Nothing
-            ElseIf combo > 29 Then
+            ElseIf combo > 5 Then
                 diag = diag & "m" & cand & ": refused. "
             End If
             DeleteSeg seg
@@ -686,9 +699,8 @@ Function ResumeDrawing() As Boolean
     On Error Resume Next
     swDraw.EditSheet                                  ' normal sheet mode (not sheet format, not a sketch)
     swModel.ClearSelection2 True
-    swModel.ForceRebuild3 False
+    swModel.EditRebuild3
     eKey = ""
-    swModel.GraphicsRedraw2
     On Error GoTo 0
     If viewDet Is Nothing Then detailPending = True
     ResumeDrawing = True
@@ -699,7 +711,7 @@ End Function
 Sub CheckScalesAndAlignment()
     Dim a As Variant, b As Variant, ok As Boolean
     EnsureSheetScale
-    swModel.ForceRebuild3 False
+    swModel.EditRebuild3
     a = SheetPt(viewMain, 0, 0, 0)
     ok = (Abs(a(0) - MAIN_X) < 0.002 And Abs(a(1) - MAIN_Y) < 0.002)
     Check ok, "Alignment: main view left end at " & Format(a(0), "0.000") & ", " & Format(a(1), "0.000")
@@ -767,7 +779,6 @@ Function DrawViewCircle(v As Object, c As Variant, ByVal rad As Double, ByVal ca
     End Select
     swModel.SketchManager.AddToDB = False
     Set DrawViewCircle = swModel.SketchManager.CreateCircle(x, y, 0#, x + rr, y, 0#)
-    swModel.GraphicsRedraw2
 End Function
 
 Sub DeleteSeg(seg As Object)
@@ -813,7 +824,8 @@ Sub PlaceView(v As Object, ByVal r As Double, ByVal u As Double, ByVal f As Doub
         If doX Then pos(0) = pos(0) + (tx - cur(0)) * IN_M
         If doY Then pos(1) = pos(1) + (ty - cur(1)) * IN_M
         v.Position = pos
-        swModel.ForceRebuild3 False
+        swModel.EditRebuild3                          ' v7: partial rebuild; a full one only if the position reads stale
+        If Abs(SheetPt(v, r, u, f)(0) - cur(0)) + Abs(SheetPt(v, r, u, f)(1) - cur(1)) < 0.000001 Then Call swModel.ForceRebuild3(False)
         On Error GoTo 0
     Next
     cur = SheetPt(v, r, u, f)
@@ -1409,7 +1421,6 @@ Sub ClearCommand()
     swModel.ClearSelection2 True
     swDraw.ActivateSheet swDraw.GetCurrentSheet.GetName
     swModel.ClearSelection2 True
-    swModel.GraphicsRedraw2
 End Sub
 
 ' =====================================================================================
