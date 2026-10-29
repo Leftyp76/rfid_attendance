@@ -32,6 +32,10 @@
 '   - SECTION A-A stays projected from the front view; the report checks both centres are level.
 '   - The dimensions above the section are stacked .24 in apart, with their text in one column.
 '
+'  v2: views forced to 1:1 (SolidWorks had auto-scaled them to 1:2); bolt circle and hole circles
+'      scale-aware; hole depths measured exactly from their edges, blind holes told apart by depth;
+'      tolerance values tried several ways until they read back; counterbore <HOLE-SPOT>,
+'      countersink <HOLE-SINK>, parallelism <IGTOL-PARA>; every hole listed in the check file
 '  v1: first version
 '
 '  SAFETY
@@ -95,7 +99,7 @@ Dim pOrg As Variant              ' model point: part centre on the back face (da
 ' ---- the six holes on the bolt circle ----
 Dim hN As Long
 Dim hD(5) As Variant             ' offset from the part centre (model vector, metres)
-Dim hCb(5) As Boolean, hCsk(5) As Boolean, hSpan(5) As Double
+Dim hCb(5) As Boolean, hCsk(5) As Boolean, hSpan(5) As Double, hRmin(5) As Double
 Dim hR(5) As Double, hU(5) As Double, hKind(5) As String
 
 Dim viewFront As Object, viewSec As Object, viewIso As Object
@@ -253,7 +257,7 @@ Sub FindOrientation()
     ' ---- the holes on the dia 2.50 bolt circle, grouped by position ----
     hN = 0
     For k = 0 To 5
-        hD(k) = Empty: hCb(k) = False: hCsk(k) = False: hSpan(k) = 0: hKind(k) = ""
+        hD(k) = Empty: hCb(k) = False: hCsk(k) = False: hSpan(k) = 0: hKind(k) = "": hRmin(k) = 9#
     Next
     If Abs(vF(0)) < 0.9 Then e1 = Unit(Cross(vF, Arr3(1, 0, 0))) Else e1 = Unit(Cross(vF, Arr3(0, 1, 0)))
     For b = LBound(bodies) To UBound(bodies)
@@ -266,10 +270,11 @@ Sub FindOrientation()
                 If r < 0.3 And Abs(Dot(Unit(Arr3(cp(3), cp(4), cp(5))), vF)) > 0.999 Then
                     g = HoleGroup(InPlane(Arr3(cp(0), cp(1), cp(2)), p0))
                     If g >= 0 Then
+                        If r < hRmin(g) Then hRmin(g) = r
                         If Abs(r - 0.22) < 0.004 Then hCb(g) = True
                         If Abs(r - R257) < 0.003 Then
-                            sp = SpanAlong(faces(i).GetBox, vF)
-                            w = (sp(1) - sp(0)) / IN_M
+                            w = CylSpan(faces(i))                          ' exact, from its circular edges
+                            If w < 0 Then sp = SpanAlong(faces(i).GetBox, vF): w = (sp(1) - sp(0)) / IN_M
                             If w > hSpan(g) Then hSpan(g) = w
                         End If
                     End If
@@ -299,21 +304,33 @@ Sub FindOrientation()
           "Part size 3.875 x 3.875 x .480 (measured " & Format(wR, "0.000") & " x " & Format(wU, "0.000") & " x " & Format(wF, "0.000") & ")"
 
     ' ---- name each hole by its shape ----
+    Dim b1 As Long, b2 As Long
+    b1 = -1: b2 = -1
     For k = 0 To hN - 1
         hR(k) = Dot(hD(k), vR) / IN_M: hU(k) = Dot(hD(k), vU) / IN_M
         If hCb(k) Then
             hKind(k) = "CBORE"
         ElseIf hCsk(k) Then
             hKind(k) = "CSK"
+        ElseIf hSpan(k) <= 0 Then
+            hKind(k) = "TAP"                                   ' no dia .257 bore: the tap drill hole
         ElseIf hSpan(k) > 0.39 Then
             hKind(k) = "THRU"
-        ElseIf Abs(hSpan(k) - 0.35) < 0.03 Then
-            hKind(k) = "D35"
-        ElseIf Abs(hSpan(k) - 0.1) < 0.03 Then
-            hKind(k) = "D10"
         Else
-            hKind(k) = "TAP"
+            hKind(k) = "BLIND"
+            If b1 < 0 Then b1 = k Else b2 = k
         End If
+    Next
+    ' the two blind holes: the shallower one is the .10 deep, the deeper one the .35 deep
+    If b1 >= 0 And b2 >= 0 Then
+        If hSpan(b1) > hSpan(b2) Then k = b1: b1 = b2: b2 = k
+        hKind(b1) = "D10": hKind(b2) = "D35"
+    ElseIf b1 >= 0 Then
+        If Abs(hSpan(b1) - 0.1) < Abs(hSpan(b1) - 0.35) Then hKind(b1) = "D10" Else hKind(b1) = "D35"
+    End If
+    For k = 0 To hN - 1
+        Info "Hole at " & Format(AngDeg(hR(k), hU(k)), "0") & " deg: " & hKind(k) & "  (smallest bore " & ChrW(216) & _
+             Format(2 * hRmin(k), "0.000") & IIf(hSpan(k) > 0, ", " & ChrW(216) & ".257 bore " & Format(hSpan(k), "0.000") & " long", "") & ")"
     Next
     Check (hN = 6), hN & " holes found on the " & ChrW(216) & "2.50 bolt circle (reference: 6)"
     HoleLayout
@@ -391,6 +408,38 @@ End Function
 Function BoxMid(bx As Variant) As Variant
     BoxMid = Arr3((bx(0) + bx(3)) / 2, (bx(1) + bx(4)) / 2, (bx(2) + bx(5)) / 2)
 End Function
+
+' length of a cylinder face along vF, from the centres of its circular edges (exact); -1 if unknown
+Function CylSpan(fc As Object) As Double
+    Dim eds As Variant, j As Long, c As Object, cc As Variant, t As Double, lo As Double, hi As Double, n As Long
+    CylSpan = -1
+    lo = 1E+30: hi = -1E+30
+    On Error Resume Next
+    eds = fc.GetEdges
+    If Not IsArray(eds) Then Exit Function
+    For j = LBound(eds) To UBound(eds)
+        Set c = Nothing
+        Set c = eds(j).GetCurve
+        If Not c Is Nothing Then
+            If c.IsCircle Then
+                cc = Empty
+                cc = c.CircleParams
+                If IsArray(cc) Then
+                    t = Dot(Arr3(cc(0), cc(1), cc(2)), vF)
+                    If t < lo Then lo = t
+                    If t > hi Then hi = t
+                    n = n + 1
+                End If
+            End If
+        End If
+    Next
+    If n >= 2 Then CylSpan = (hi - lo) / IN_M
+End Function
+
+' a line in the check file that is information only (not counted as OK or PROBLEM)
+Sub Info(ByVal label As String)
+    report = report & "INFO     " & label & vbCrLf
+End Sub
 
 ' smallest and largest value of a box's 8 corners along direction "along" (metres)
 Function SpanAlong(bx As Variant, along As Variant) As Variant
@@ -525,8 +574,7 @@ Sub MakeFront()
     Set viewFront = OrientedView("HW8A_Front", vR, vU, vF, FRONT_X, FRONT_Y, StdFrontName(), False)
     If viewFront Is Nothing Then Err.Raise vbObjectError + 9, , "Could not create a correctly oriented front view."
     Check True, "Front view: pocket and logo toward you, counterbore hole at the top"
-    sc = 0: On Error Resume Next: sc = viewFront.ScaleDecimal: On Error GoTo 0
-    Check (Abs(sc - 1#) < 0.001), "Front view scale 1:1"
+    Check SetViewScale(viewFront, 1#), "Front view scale 1:1 (" & Format(ViewSc(viewFront), "0.###") & ")"
     SetMode viewFront, DM_HIDDEN_REMOVED, "Front"
     PlaceView viewFront, 0#, 0#, 0#, FRONT_X, FRONT_Y, True, True, _
               "Front view placed (part centre at " & Format(FRONT_X, "0.00") & ", " & Format(FRONT_Y, "0.00") & ")"
@@ -592,12 +640,13 @@ Sub MakeSectionAA()
     ok = FrameOK(sv, vF, -1, 0, vU, 0, 1)
     Check ok, "SECTION A-A: arrows point left, pocket on the left of the section" & IIf(ok, "", " - click the cutting line, Flip Direction")
     Set viewSec = sv
+    Check SetViewScale(viewSec, 1#), "SECTION A-A scale 1:1 (" & Format(ViewSc(viewSec), "0.###") & ")"
     SetMode viewSec, DM_HIDDEN_REMOVED, "SECTION A-A"
     PlaceView viewSec, 0#, 0#, 0#, SEC_X, FRONT_Y, True, False, "SECTION A-A placed (back face at x = " & Format(SEC_X, "0.00") & ")"
 End Sub
 
 Sub MakeIso()
-    Dim dv As Variant, upI As Variant, rtI As Variant, sr(1) As Double, va As Variant, sc As Double, m As Long
+    Dim dv As Variant, upI As Variant, rtI As Variant, m As Long
     dv = Unit(Add3(Add3(vR, vU), vF))
     upI = Unit(Sub3(vU, Scl(dv, Dot(vU, dv))))
     rtI = Cross(upI, dv)
@@ -609,15 +658,11 @@ Sub MakeIso()
     Check True, "Isometric view"
 
     ' scale 1:3
-    sr(0) = 1#: sr(1) = ISO_DEN: va = sr
-    On Error Resume Next
-    viewIso.UseSheetScale = False
-    viewIso.ScaleRatio = va
-    sc = 0: sc = viewIso.ScaleDecimal
-    If Abs(sc - 1# / ISO_DEN) > 0.001 Then Err.Clear: viewIso.ScaleDecimal = 1# / ISO_DEN: sc = viewIso.ScaleDecimal
-    swModel.ForceRebuild3 False
-    On Error GoTo 0
-    Check (Abs(sc - 1# / ISO_DEN) < 0.001), "Isometric view scale 1:3" & IIf(Abs(sc - 1# / ISO_DEN) < 0.001, "", " - set Scale > Use custom scale 1:3 by hand")
+    If SetViewScale(viewIso, ISO_DEN) Then
+        Check True, "Isometric view scale 1:3"
+    Else
+        Check False, "Isometric view scale is " & Format(ViewSc(viewIso), "0.###") & " - set Scale > Use custom scale 1:3 by hand"
+    End If
 
     ' shaded with edges
     On Error Resume Next
@@ -627,6 +672,30 @@ Sub MakeIso()
     Check (m = DM_SHADED), "Isometric view: shaded with edges" & IIf(m = DM_SHADED, "", " - pick Shaded With Edges by hand")
     PlaceView viewIso, 0#, 0#, F_PAD / 2, ISO_X, ISO_Y, True, True, "Isometric view placed (part centre)"
 End Sub
+
+' set view v to scale 1:den (SolidWorks may auto-scale new views); True when it reads back right
+Function SetViewScale(v As Object, ByVal den As Double) As Boolean
+    Dim sr(1) As Double, va As Variant
+    If Abs(ViewSc(v) - 1# / den) > 0.0005 Then
+        sr(0) = 1#: sr(1) = den: va = sr
+        On Error Resume Next
+        v.UseSheetScale = False
+        v.ScaleRatio = va
+        If Abs(ViewSc(v) - 1# / den) > 0.0005 Then Err.Clear: v.ScaleDecimal = 1# / den
+        swModel.ForceRebuild3 False
+        On Error GoTo 0
+    End If
+    SetViewScale = (Abs(ViewSc(v) - 1# / den) < 0.0005)
+End Function
+
+Function ViewSc(v As Object) As Double
+    Dim sc As Double
+    On Error Resume Next
+    sc = 0
+    sc = v.ScaleDecimal
+    If sc <= 0 Then sc = 1#
+    ViewSc = sc
+End Function
 
 ' =====================================================================================
 '  Sketching in the front view (cutting line, bolt circle, radial centre lines)
@@ -807,7 +876,7 @@ Sub CentreMarks()
     c = SheetPt(viewFront, 0#, 0#, F_FLOOR)
     Set seg = Nothing
     For Each cand In CandOrder()
-        Set seg = DrawCirc(viewFront, c, BC, CInt(cand))
+        Set seg = DrawCirc(viewFront, c, BC * ViewSc(viewFront), CInt(cand))     ' radius on the sheet
         If Not seg Is Nothing Then
             d1 = TestDist(seg, True, Array(-HALF, 0.3, F_RIM))
             d2 = TestDist(seg, False, Array(-0.5, HALF, F_RIM))
@@ -843,15 +912,16 @@ End Sub
 
 ' edge-table circle of hole k: the dia .257 one if there is one, else the smallest circle there
 Function HoleCircle(ByVal k As Long) As Long
-    Dim i As Long, c As Variant, best As Long, bestR As Double
+    Dim i As Long, c As Variant, best As Long, bestR As Double, sc As Double
     HoleCircle = -1
     If k < 0 Then Exit Function
+    sc = ViewSc(viewFront)                                ' edge-table radii are sheet sizes
     c = SheetPt(viewFront, hR(k), hU(k), F_FLOOR)
     best = -1: bestR = 1E+30
     For i = 0 To eN - 1
         If eKind(i) = "C" Then
             If Sqr((eCX(i) - c(0)) ^ 2 + (eCY(i) - c(1)) ^ 2) < 0.01 Then
-                If Abs(eR(i) - R257) < 0.004 Then HoleCircle = i: Exit Function
+                If Abs(eR(i) / sc - R257) < 0.004 Then HoleCircle = i: Exit Function
                 If eR(i) < bestR Then bestR = eR(i): best = i
             End If
         End If
@@ -1086,11 +1156,11 @@ Sub DimFront()
     Check (Len(why) = 0), "Front    6 X 60" & ChrW(176) & IIf(Len(why) = 0, "", "  - " & why)
 
     ' hole callouts, each on the hole that has that shape
-    HoleDim "CBORE", " <HOLE-CBORE> <MOD-DIAM> .44 <HOLE-DEPTH> .25", -2.49, 2.51, "Front    " & D & " .257 cbore " & D & " .44 deep .25"
+    HoleDim "CBORE", " <HOLE-SPOT> <MOD-DIAM> .44 <HOLE-DEPTH> .25", -2.49, 2.51, "Front    " & D & " .257 cbore " & D & " .44 deep .25"
     HoleDim "D10", " <HOLE-DEPTH> .10", -2.88, 1.66, "Front    " & D & " .257 deep .10"
     HoleDim "THRU", " THRU", 2.35, 2.49, "Front    " & D & " .257 THRU"
     HoleDim "D35", " <HOLE-DEPTH> .35", 2.93, -2.1, "Front    " & D & " .257 deep .35"
-    HoleDim "CSK", " <HOLE-CSINK> <MOD-DIAM> .50 X 90<MOD-DEG>", 3.35, -2.48, "Front    " & D & " .257 csk " & D & " .50 X 90" & ChrW(176)
+    HoleDim "CSK", " <HOLE-SINK> <MOD-DIAM> .50 X 90<MOD-DEG>", 3.35, -2.48, "Front    " & D & " .257 csk " & D & " .50 X 90" & ChrW(176)
     LeaderNoteI viewFront, HoleCircle(HoleIdx("TAP")), "1/4-20 UNC", cx - 3.37, cy + 1.4, "Front    1/4-20 UNC note on the tapped hole"
 
     ' outside corners: fillet at the lower-left corner (left side meets the chamfer), chamfer midpoint
@@ -1178,7 +1248,7 @@ End Sub
 
 Function SetTol(dd As Object, ByVal tolType As Long, ByVal tMin As Double, ByVal tMax As Double, _
                 ByVal prec As Long, ByVal tolPrec As Long) As String
-    Dim tol As Object, tp As Long, mx As Double
+    Dim tol As Object, tp As Long, way As Integer, ok As Boolean, cfg As String
     If dd Is Nothing Then SetTol = "value OK, but the dimension was lost before its tolerance": Exit Function
     On Error Resume Next
     Set tol = dd.GetDimension2(0).Tolerance
@@ -1187,21 +1257,55 @@ Function SetTol(dd As Object, ByVal tolType As Long, ByVal tMin As Double, ByVal
         Exit Function
     End If
     tol.Type = tolType
-    Err.Clear
-    tol.SetValues2 tMin * IN_M, tMax * IN_M, 2, Empty
-    If Err.Number <> 0 Then Err.Clear: tol.SetValues tMin * IN_M, tMax * IN_M
+    cfg = "": cfg = swPart.ConfigurationManager.ActiveConfiguration.Name
+    ' v1 set the values silently to 0, so each way is tried until the values read back right
+    For way = 1 To 5
+        Err.Clear
+        Select Case way
+            Case 1: tol.SetValues2 tMin * IN_M, tMax * IN_M, 1, ""                 ' this configuration (SolidWorks' example)
+            Case 2: tol.SetValues2 tMin * IN_M, tMax * IN_M, 2, ""                 ' all configurations
+            Case 3: tol.SetValues tMin * IN_M, tMax * IN_M
+            Case 4: tol.SetValues2 tMin * IN_M, tMax * IN_M, 3, Array(cfg)         ' the part's configuration by name
+            Case 5: tol.Type = tolType: tol.SetValues2 tMin * IN_M, tMax * IN_M, 1, Empty
+        End Select
+        If TolReads(tol, tolType, tMin, tMax) Then ok = True: Exit For
+    Next
     Err.Clear
     dd.SetPrecision3 prec, -1, tolPrec, -1
     If Err.Number <> 0 Then Err.Clear: dd.SetPrecision2 prec, -1, tolPrec, -1
-    swModel.GraphicsRedraw2
     tp = -1: tp = tol.Type
-    mx = -99: mx = tol.GetMaxValue / IN_M
+    If Not ok And tolType = TOL_SYM Then                  ' last resort for +-: write it as text after the value
+        tol.Type = 0
+        dd.SetText 2, "<MOD-PM>" & Mid(Format(tMax, "0.000"), 2)
+        ok = True: tp = tolType: way = 6
+    End If
+    swModel.GraphicsRedraw2
     On Error GoTo 0
     If tp <> tolType Then
         SetTol = "value OK, but the tolerance type did not stick; set it in the PropertyManager"
-    ElseIf mx > -98 And Abs(mx - tMax) > 0.0001 Then
-        SetTol = "value OK, but the tolerance reads +" & Format(mx, "0.000") & "; set it in the PropertyManager"
+    ElseIf Not ok Then
+        SetTol = "value OK, but the tolerance values would not stick (they read " & TolText(tol) & "); set them in the PropertyManager"
+    ElseIf way = 6 Then
+        Info "  (tolerance written as text after the value: SolidWorks would not take the tolerance values)"
     End If
+End Function
+
+Function TolReads(tol As Object, ByVal tolType As Long, ByVal tMin As Double, ByVal tMax As Double) As Boolean
+    Dim mn As Double, mx As Double
+    On Error Resume Next
+    mn = -99: mx = -99
+    mx = tol.GetMaxValue / IN_M
+    mn = tol.GetMinValue / IN_M
+    TolReads = (Abs(mx - tMax) < 0.00005) And (tolType = TOL_SYM Or Abs(mn - tMin) < 0.00005)
+End Function
+
+Function TolText(tol As Object) As String
+    Dim mn As Double, mx As Double
+    On Error Resume Next
+    mn = -99: mx = -99
+    mx = tol.GetMaxValue / IN_M
+    mn = tol.GetMinValue / IN_M
+    TolText = "+" & Format(mx, "0.000") & " / " & Format(mn, "0.000")
 End Function
 
 ' datum A on the back face, and the // .002 A frame above the pad's front face
@@ -1237,8 +1341,8 @@ Sub GtolAndDatum()
     On Error Resume Next
     Set g = swModel.InsertGtol
     If Not g Is Nothing Then
-        okS = g.SetFrameSymbols2(1, "<IGTOL-PARALLEL>", False, "", False, "", "", "", "")
-        If Err.Number <> 0 Or Not okS Then Err.Clear: okS = g.SetFrameSymbols3(1, "<IGTOL-PARALLEL>", False, "", False, "", "", "", "")
+        okS = g.SetFrameSymbols2(1, "<IGTOL-PARA>", False, "", False, "", "", "", "")
+        If Err.Number <> 0 Or Not okS Then Err.Clear: okS = g.SetFrameSymbols3(1, "<IGTOL-PARA>", False, "", False, "", "", "", "")
         Err.Clear
         okV = g.SetFrameValues2(1, ".002", "", "A", "", "")
         If Err.Number <> 0 Or Not okV Then Err.Clear: okV = g.SetFrameValues(1, ".002", "", "A", "", "")
